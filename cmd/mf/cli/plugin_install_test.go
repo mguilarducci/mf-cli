@@ -143,7 +143,7 @@ func TestRequireSecureAssetURL(t *testing.T) {
 
 func git(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := exec.CommandContext(t.Context(), "git", args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(),
 		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
@@ -205,7 +205,9 @@ func releaseServer(t *testing.T, name string, binary []byte, corruptChecksum boo
 		case checksumsFileName:
 			fmt.Fprintf(w, "%s  %s\n", digest, asset)
 		case asset:
-			_, _ = w.Write(archive)
+			if _, err := w.Write(archive); err != nil {
+				t.Errorf("serve asset: %v", err)
+			}
 		default:
 			http.NotFound(w, r)
 		}
