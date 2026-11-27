@@ -20,7 +20,7 @@ func newPluginGroupCmd() *cobra.Command {
 		Short:   "Manage mf plugins (install, list, remove)",
 		Long: `A plugin is any executable named mf-<name>. Put it on PATH, or install it
 with 'mf plugin install', and run it as 'mf <name>'.`,
-		Run: func(cmd *cobra.Command, args []string) { _ = cmd.Help() },
+		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
 	cmd.AddCommand(newPluginInstallCmd(), newPluginListCmd(), newPluginRemoveCmd())
 	return cmd
@@ -59,7 +59,7 @@ func newPluginListCmd() *cobra.Command {
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "List plugins found on PATH and in the managed dir",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			plugins := discoverPlugins()
 			if output == "json" {
 				enc := json.NewEncoder(os.Stdout)

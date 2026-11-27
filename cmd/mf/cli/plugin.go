@@ -5,12 +5,15 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 
 	"github.com/spf13/cobra"
+
+	"github.com/mguilarducci/mf-cli/cmd/mf/cli/versioninfo"
 )
 
 // External-command resolution, kubectl-style (same model as entireio/cli).
@@ -21,12 +24,12 @@ const pluginBinaryPrefix = "mf-"
 
 // MaybeRunPlugin returns (true, exitCode) when a plugin was resolved and run,
 // and (false, 0) when the caller should fall through to Cobra.
-func MaybeRunPlugin(root *cobra.Command, args []string) (handled bool, exitCode int) {
+func MaybeRunPlugin(ctx context.Context, root *cobra.Command, args []string) (handled bool, exitCode int) {
 	binPath, pluginArgs, ok := resolvePlugin(root, args)
 	if !ok {
 		return false, 0
 	}
-	return true, runPlugin(args[0], binPath, pluginArgs)
+	return true, runPlugin(ctx, args[0], binPath, pluginArgs)
 }
 
 func resolvePlugin(root *cobra.Command, args []string) (binPath string, pluginArgs []string, ok bool) {
@@ -50,12 +53,12 @@ func resolvePlugin(root *cobra.Command, args []string) (binPath string, pluginAr
 	return binPath, args[1:], true
 }
 
-func runPlugin(name, binPath string, args []string) int {
-	cmd := exec.Command(binPath, args...)
+func runPlugin(ctx context.Context, name, binPath string, args []string) int {
+	cmd := exec.CommandContext(ctx, binPath, args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 
 	extras := []string{
-		"MF_CLI_VERSION=" + Version,
+		"MF_CLI_VERSION=" + versioninfo.Version,
 		"MF_PLUGIN_NAME=" + name,
 	}
 	if dataDir, err := PluginDataDir(name); err == nil {

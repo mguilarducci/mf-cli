@@ -1,0 +1,4 @@
+#!/bin/sh
+#MISE description="Lint shell scripts"
+
+shellcheck scripts/*.sh mise-tasks/build mise-tasks/release mise-tasks/lint/* mise-tasks/test/ci/*

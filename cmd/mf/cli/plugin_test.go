@@ -90,12 +90,12 @@ func TestPluginEnvPrefix(t *testing.T) {
 func TestPluginDirs(t *testing.T) {
 	t.Setenv("MF_PLUGIN_DIR", "")
 	t.Setenv("XDG_DATA_HOME", "/xdg")
-	if got, _ := PluginBinDir(); got != "/xdg/mf/plugins/bin" {
-		t.Errorf("PluginBinDir() = %q", got)
+	if got, err := PluginBinDir(); err != nil || got != "/xdg/mf/plugins/bin" {
+		t.Errorf("PluginBinDir() = %q, %v", got, err)
 	}
 	t.Setenv("MF_PLUGIN_DIR", "/custom")
-	if got, _ := PluginDataDir("digisac"); got != "/custom/data/digisac" {
-		t.Errorf("PluginDataDir() = %q", got)
+	if got, err := PluginDataDir("digisac"); err != nil || got != "/custom/data/digisac" {
+		t.Errorf("PluginDataDir() = %q, %v", got, err)
 	}
 	if _, err := PluginDataDir("../escape"); err == nil {
 		t.Error("PluginDataDir(\"../escape\"): want error")
@@ -123,8 +123,8 @@ func TestInstallListRemove(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if target, _ := os.Readlink(dst); target != src {
-		t.Errorf("install should symlink to %q, got %q", src, target)
+	if target, err := os.Readlink(dst); err != nil || target != src {
+		t.Errorf("install should symlink to %q, got %q (%v)", src, target, err)
 	}
 
 	plugins := discoverPlugins()

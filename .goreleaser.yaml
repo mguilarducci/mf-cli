@@ -1,0 +1,64 @@
+# Adapted from entireio/cli's .goreleaser.yaml (MIT, see NOTICE).
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: mf
+    main: ./cmd/mf
+    binary: mf
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags:
+      - -s -w
+      - -X github.com/mguilarducci/mf-cli/cmd/mf/cli/versioninfo.Version={{.Version}}
+      - -X github.com/mguilarducci/mf-cli/cmd/mf/cli/versioninfo.Commit={{.ShortCommit}}
+
+archives:
+  - id: mf
+    ids:
+      - mf
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "mf_{{ .Os }}_{{ .Arch }}"
+    files:
+      - src: LICENSE
+        info:
+          owner: root
+          group: root
+          mtime: "{{ .CommitDate }}"
+      - src: NOTICE
+        info:
+          owner: root
+          group: root
+          mtime: "{{ .CommitDate }}"
+      - src: README.md
+        info:
+          owner: root
+          group: root
+          mtime: "{{ .CommitDate }}"
+      - src: third_party/licenses/*
+        info:
+          owner: root
+          group: root
+          mtime: "{{ .CommitDate }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+release:
+  prerelease: auto
