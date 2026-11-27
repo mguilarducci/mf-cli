@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/mguilarducci/mfcli/cmd/mf-cli/cli"
+	"github.com/mguilarducci/mf-cli/cmd/mf-cli/cli"
 )
 
 func main() {

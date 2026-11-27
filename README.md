@@ -1,1 +1,1 @@
-# mfcli
+# mf-cli

@@ -1,4 +1,4 @@
-module github.com/mguilarducci/mfcli
+module github.com/mguilarducci/mf-cli
 
 go 1.27.4
 
