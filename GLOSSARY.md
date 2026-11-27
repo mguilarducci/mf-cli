@@ -19,3 +19,7 @@ _Avoid_: plugin index, plugin store
 **Search path**:
 The ordered list of directories looked through for **Plugins**: the **Plugin registry**'s own directory first, then the user's `PATH`. The first match for a name wins.
 _Avoid_: lookup path, plugin path
+
+**Plugin environment**:
+The environment variables a **Plugin** receives when `mf` runs it.
+_Avoid_: plugin env contract, env allowlist
