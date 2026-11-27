@@ -6,6 +6,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -52,9 +53,11 @@ const (
 var ownerNameRe = regexp.MustCompile(`^([A-Za-z0-9][A-Za-z0-9-]*)/([A-Za-z0-9._-]+)$`)
 
 type installSource struct {
-	Kind installSourceKind
-	Ref  string // URL for repo/URL sources, file path for path sources
-	Name string // plugin name expected from a name or owner/name source
+	Kind     installSourceKind
+	Ref      string // URL for repo/URL sources, file path for path sources
+	Name     string // plugin name expected from a name or owner/name source
+	Bare     bool   // a bare name: the default owner is a guess, not the user's choice
+	Answered bool   // typed in answer to the not-found prompt
 }
 
 // parseInstallSource classifies the install argument:
@@ -96,7 +99,7 @@ func parseInstallSource(arg string) (installSource, error) {
 		if err := validatePluginName(arg); err != nil {
 			return installSource{}, err
 		}
-		return installSource{Kind: installFromRepo, Ref: conventionRepoURL(defaultPluginOwner, arg), Name: arg}, nil
+		return installSource{Kind: installFromRepo, Ref: conventionRepoURL(defaultPluginOwner, arg), Name: arg, Bare: true}, nil
 	}
 }
 
@@ -128,7 +131,8 @@ func newPluginInstallCmd() *cobra.Command {
 
 Source forms:
 
-  name        A plugin of the default owner (` + defaultPluginOwner + `):
+  name        Looked up under the default owner first; if there is no such
+              repository, mf asks for owner/repo:
                   mf plugin install digisac      # github.com/` + defaultPluginOwner + `/mf-digisac
   owner/name  A plugin repository named mf-<name> on GitHub:
                   mf plugin install someone/foo  # github.com/someone/mf-foo
@@ -178,9 +182,18 @@ skip (required in non-interactive runs).`,
 
 func runRemoteInstall(cmd *cobra.Command, src installSource, f installFlags) error {
 	ctx := cmd.Context()
+	if src.Bare {
+		resolved, err := resolveBareName(ctx, cmd, src, os.Stdin, stdinIsTerminal())
+		if err != nil {
+			return fmt.Errorf("install plugin: %w", err)
+		}
+		src = resolved
+	}
 	repoURL, expectedName := src.Ref, src.Name
 
-	if !f.yes && !trustedRepo(repoURL) {
+	// A bare name that fell back to a typed owner/repo was the user's explicit
+	// answer, so it is not asked about twice.
+	if !f.yes && !src.Answered && !trustedRepo(repoURL) {
 		// Code from wherever the user pointed: confirm before running it.
 		ok, err := confirm(cmd, "Install and run plugin code from "+redactURL(repoURL)+"?")
 		if err != nil {
@@ -205,10 +218,51 @@ func runRemoteInstall(cmd *cobra.Command, src installSource, f installFlags) err
 	return nil
 }
 
+// repoExists is a seam for tests: it reports whether a git remote answers.
+//
+//nolint:gochecknoglobals // test seam
+var repoExists = func(ctx context.Context, repoURL string) bool {
+	_, err := runGit(ctx, "ls-remote", "--heads", "--", repoURL)
+	return err == nil
+}
+
+func stdinIsTerminal() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
+
+// resolveBareName looks a bare name up under the default owner first. When
+// that repository does not exist, it asks for owner/repo instead (a
+// non-interactive run fails and says to pass one).
+func resolveBareName(ctx context.Context, cmd *cobra.Command, src installSource, in io.Reader, interactive bool) (installSource, error) {
+	if repoExists(ctx, src.Ref) {
+		return src, nil
+	}
+	notFound := fmt.Sprintf("no plugin %q at %s", src.Name, redactURL(src.Ref))
+	if !interactive {
+		return installSource{}, fmt.Errorf("%s; pass owner/repo, e.g. mf plugin install someone/%s", notFound, src.Name)
+	}
+	fmt.Fprintf(cmd.ErrOrStderr(), "%s.\nowner/repo (empty to cancel): ", notFound)
+	line, err := bufio.NewReader(in).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return installSource{}, fmt.Errorf("read answer: %w", err)
+	}
+	answer := strings.TrimSpace(line)
+	if answer == "" {
+		return installSource{}, errors.New("cancelled")
+	}
+	next, err := parseInstallSource(answer)
+	if err != nil {
+		return installSource{}, err
+	}
+	if next.Kind == installFromPath || next.Bare {
+		return installSource{}, fmt.Errorf("%q is not owner/repo or a repository URL", answer)
+	}
+	next.Answered = true
+	return next, nil
+}
+
 // confirm asks a yes/no question on the terminal. Non-interactive runs fail
 // instead of guessing; --yes is the explicit opt-in.
 func confirm(cmd *cobra.Command, prompt string) (bool, error) {
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
+	if !stdinIsTerminal() {
 		return false, errors.New("confirmation needed but stdin is not a terminal; pass --yes")
 	}
 	fmt.Fprintf(cmd.ErrOrStderr(), "%s [y/N] ", prompt)

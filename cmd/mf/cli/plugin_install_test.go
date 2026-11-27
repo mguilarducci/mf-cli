@@ -292,3 +292,47 @@ func TestInstallRefusesUnexpectedName(t *testing.T) {
 		t.Fatal("requested name differs from the declared name: want error")
 	}
 }
+
+func TestResolveBareName(t *testing.T) {
+	exists := map[string]bool{"https://github.com/mguilarducci/mf-digisac": true}
+	orig := repoExists
+	repoExists = func(_ context.Context, u string) bool { return exists[u] }
+	t.Cleanup(func() { repoExists = orig })
+
+	bare := func(name string) installSource {
+		src, err := parseInstallSource(name)
+		if err != nil || !src.Bare {
+			t.Fatalf("parseInstallSource(%q) = %+v, %v", name, src, err)
+		}
+		return src
+	}
+	run := func(name, input string, interactive bool) (installSource, error) {
+		cmd := newPluginInstallCmd()
+		cmd.SetErr(&bytes.Buffer{})
+		return resolveBareName(context.Background(), cmd, bare(name), strings.NewReader(input), interactive)
+	}
+
+	// Found under the default owner: no prompt, nothing read.
+	if got, err := run("digisac", "", false); err != nil || got.Ref != "https://github.com/mguilarducci/mf-digisac" {
+		t.Errorf("default owner hit = %+v, %v", got, err)
+	}
+	// Not found, interactive: the typed owner/repo is used and counts as answered.
+	got, err := run("foo", "someone/foo\n", true)
+	if err != nil || got.Ref != "https://github.com/someone/mf-foo" || got.Name != "foo" || !got.Answered {
+		t.Errorf("owner/repo answer = %+v, %v", got, err)
+	}
+	// A full URL is accepted too.
+	if got, err := run("foo", "https://gitlab.com/x/mf-foo\n", true); err != nil || got.Kind != installFromURL {
+		t.Errorf("URL answer = %+v, %v", got, err)
+	}
+	// Empty answer cancels; a bare name or path answer is refused.
+	for _, in := range []string{"\n", "foo\n", "./mf-foo\n"} {
+		if _, err := run("foo", in, true); err == nil {
+			t.Errorf("answer %q: want error", in)
+		}
+	}
+	// Not found, non-interactive: fail and say to pass owner/repo.
+	if _, err := run("foo", "", false); err == nil || !strings.Contains(err.Error(), "pass owner/repo") {
+		t.Errorf("non-interactive miss = %v", err)
+	}
+}
