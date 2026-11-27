@@ -20,25 +20,58 @@ import (
 )
 
 func TestParseInstallSource(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if err := os.MkdirAll("bin", 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("bin/mf-local", nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	cases := []struct {
-		arg  string
-		kind installSourceKind
-		ok   bool
+		arg     string
+		kind    installSourceKind
+		ref     string
+		name    string
+		wantErr bool
 	}{
-		{"digisac", installFromIndex, true},
-		{"https://github.com/mguilarducci/mf-digisac", installFromURL, true},
-		{"git@github.com:mguilarducci/mf-digisac.git", installFromURL, true},
-		{"./bin/mf-digisac", installFromPath, true},
-		{"bin/mf-digisac", installFromPath, true},
-		{".", installFromPath, true},
-		{"-x", 0, false},
-		{"Bad Name", 0, false},
-		{"ftp://example.com/x", 0, false},
+		{arg: "digisac", kind: installFromRepo, ref: "https://github.com/mguilarducci/mf-digisac", name: "digisac"},
+		{arg: "someone/foo", kind: installFromRepo, ref: "https://github.com/someone/mf-foo", name: "foo"},
+		{arg: "someone/mf-foo", kind: installFromRepo, ref: "https://github.com/someone/mf-foo", name: "foo"},
+		{arg: "https://github.com/mguilarducci/mf-digisac", kind: installFromURL, ref: "https://github.com/mguilarducci/mf-digisac"},
+		{arg: "git@github.com:mguilarducci/mf-digisac.git", kind: installFromURL, ref: "git@github.com:mguilarducci/mf-digisac.git"},
+		{arg: "./bin/mf-digisac", kind: installFromPath, ref: "./bin/mf-digisac"},
+		{arg: "../mf-digisac/bin/mf-digisac", kind: installFromPath, ref: "../mf-digisac/bin/mf-digisac"},
+		{arg: "bin/mf-local", wantErr: true}, // a local file and an owner/name: ambiguous
+		{arg: "a/b/c", wantErr: true},        // neither owner/name nor an explicit path
+		{arg: "-x", wantErr: true},
+		{arg: "Bad Name", wantErr: true},
+		{arg: "someone/Bad", wantErr: true},
+		{arg: "ftp://example.com/x", wantErr: true},
 	}
 	for _, c := range cases {
 		src, err := parseInstallSource(c.arg)
-		if (err == nil) != c.ok || (c.ok && src.Kind != c.kind) {
-			t.Errorf("parseInstallSource(%q) = %+v, %v; want kind %v ok=%v", c.arg, src, err, c.kind, c.ok)
+		if c.wantErr {
+			if err == nil {
+				t.Errorf("parseInstallSource(%q) = %+v; want error", c.arg, src)
+			}
+			continue
+		}
+		if err != nil || src.Kind != c.kind || src.Ref != c.ref || src.Name != c.name {
+			t.Errorf("parseInstallSource(%q) = %+v, %v; want kind=%v ref=%q name=%q", c.arg, src, err, c.kind, c.ref, c.name)
+		}
+	}
+}
+
+func TestTrustedRepo(t *testing.T) {
+	for in, want := range map[string]bool{
+		"https://github.com/mguilarducci/mf-digisac":      true,
+		"https://github.com/mguilarducci/mf-digisac.git/": true,
+		"https://github.com/someone/mf-foo":               false,
+		"https://github.com/mguilarducci-evil/mf-foo":     false,
+		"git@github.com:mguilarducci/mf-digisac.git":      false, // not the https form mf builds
+	} {
+		if got := trustedRepo(in); got != want {
+			t.Errorf("trustedRepo(%q) = %v, want %v", in, got, want)
 		}
 	}
 }
@@ -94,25 +127,6 @@ func TestParseChecksums(t *testing.T) {
 	sums := parseChecksums([]byte("ABC  mf-x_linux_amd64.tar.gz\ndef *mf-x.zip\nbad line here\n"))
 	if sums["mf-x_linux_amd64.tar.gz"] != "abc" || sums["mf-x.zip"] != "def" || len(sums) != 2 {
 		t.Errorf("parseChecksums = %v", sums)
-	}
-}
-
-func TestParsePluginIndexDropsInvalidEntries(t *testing.T) {
-	idx, err := parsePluginIndex([]byte(`{"version":1,"plugins":[
-		{"name":"digisac","repo_url":"https://github.com/mguilarducci/mf-digisac","description":"ok"},
-		{"name":"Bad","repo_url":"https://github.com/a/b"},
-		{"name":"evil","repo_url":"https://github.com/a/b","description":"\u001b[2J"}]}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(idx.Plugins) != 1 || idx.Find("digisac") == nil {
-		t.Errorf("index = %+v", idx.Plugins)
-	}
-	if idx.FindByRepoURL("https://github.com/mguilarducci/mf-digisac.git/") == nil {
-		t.Error("FindByRepoURL should normalize .git and trailing slash")
-	}
-	if _, err := parsePluginIndex([]byte(`{"version":2,"plugins":[]}`)); err == nil {
-		t.Error("unknown schema version: want error")
 	}
 }
 
@@ -216,35 +230,21 @@ func releaseServer(t *testing.T, name string, binary []byte, corruptChecksum boo
 	return srv
 }
 
-func setupRemote(t *testing.T, corrupt bool) (repoURL, indexURL string) {
+func setupRemote(t *testing.T, corrupt bool) (repoURL string) {
 	t.Helper()
 	t.Setenv("MF_PLUGIN_ALLOW_FILE_REMOTES", "1")
 	t.Setenv("MF_PLUGIN_DIR", t.TempDir())
-	t.Setenv("XDG_CACHE_HOME", t.TempDir()) // index cache (Linux)
-	t.Setenv("HOME", t.TempDir())           // index cache (macOS)
 	srv := releaseServer(t, "hello", []byte("#!/bin/sh\necho hello\n"), corrupt)
-	repoURL = gitRepo(t, map[string]string{
+	return gitRepo(t, map[string]string{
 		pluginMetadataFileName: "name: hello\ndescription: Says hello\ndownload_url: " + srv.URL + "/{tag}/{asset}\n",
 	}, "v0.9.0", "v1.0.0", "v1.1.0-rc.1")
-	indexURL = gitRepo(t, map[string]string{
-		pluginIndexFileName: `{"version":1,"plugins":[{"name":"hello","repo_url":"` + repoURL + `"}]}`,
-	})
-	return repoURL, indexURL
 }
 
-func TestInstallFromIndexEndToEnd(t *testing.T) {
-	_, indexURL := setupRemote(t, false)
+func TestInstallFromRepoEndToEnd(t *testing.T) {
+	repoURL := setupRemote(t, false)
 	ctx := context.Background()
 
-	idx, err := SyncPluginIndex(ctx, indexURL, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	entry := idx.Find("hello")
-	if entry == nil {
-		t.Fatal("index has no hello")
-	}
-	m, err := InstallPluginFromRepo(ctx, entry.RepoURL, entry.Name, RemoteInstallOptions{})
+	m, err := InstallPluginFromRepo(ctx, repoURL, "hello", RemoteInstallOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,10 +258,10 @@ func TestInstallFromIndexEndToEnd(t *testing.T) {
 		t.Fatalf("discoverPlugins = %+v", plugins)
 	}
 
-	if _, err := InstallPluginFromRepo(ctx, entry.RepoURL, "hello", RemoteInstallOptions{}); err == nil {
+	if _, err := InstallPluginFromRepo(ctx, repoURL, "hello", RemoteInstallOptions{}); err == nil {
 		t.Error("reinstall without --force: want error")
 	}
-	m, err = InstallPluginFromRepo(ctx, entry.RepoURL, "hello", RemoteInstallOptions{Force: true, Pin: "v0.9.0"})
+	m, err = InstallPluginFromRepo(ctx, repoURL, "hello", RemoteInstallOptions{Force: true, Pin: "v0.9.0"})
 	if err != nil || m.Tag != "v0.9.0" || !m.Pinned {
 		t.Errorf("pinned reinstall = %+v, %v", m, err)
 	}
@@ -276,7 +276,7 @@ func TestInstallFromIndexEndToEnd(t *testing.T) {
 }
 
 func TestInstallRejectsChecksumMismatch(t *testing.T) {
-	repoURL, _ := setupRemote(t, true)
+	repoURL := setupRemote(t, true)
 	_, err := InstallPluginFromRepo(context.Background(), repoURL, "", RemoteInstallOptions{})
 	if err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
 		t.Fatalf("want checksum mismatch, got %v", err)
@@ -287,8 +287,8 @@ func TestInstallRejectsChecksumMismatch(t *testing.T) {
 }
 
 func TestInstallRefusesUnexpectedName(t *testing.T) {
-	repoURL, _ := setupRemote(t, false)
+	repoURL := setupRemote(t, false)
 	if _, err := InstallPluginFromRepo(context.Background(), repoURL, "other", RemoteInstallOptions{}); err == nil {
-		t.Fatal("index name differs from declared name: want error")
+		t.Fatal("requested name differs from the declared name: want error")
 	}
 }

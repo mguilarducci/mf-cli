@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"text/tabwriter"
 
@@ -34,18 +36,37 @@ with 'mf plugin install', and run it as 'mf <name>'.`,
 type installSourceKind int
 
 const (
-	installFromIndex installSourceKind = iota
+	installFromRepo installSourceKind = iota // name or owner/name, resolved by convention
 	installFromURL
 	installFromPath
 )
 
+// Plugin repositories are found by convention, not through an index:
+// owner/name -> https://github.com/owner/mf-name, and a bare name uses the
+// default owner.
+const (
+	defaultPluginOwner = "mguilarducci"
+	pluginForgeURL     = "https://github.com"
+)
+
+var ownerNameRe = regexp.MustCompile(`^([A-Za-z0-9][A-Za-z0-9-]*)/([A-Za-z0-9._-]+)$`)
+
 type installSource struct {
 	Kind installSourceKind
-	Ref  string
+	Ref  string // URL for repo/URL sources, file path for path sources
+	Name string // plugin name expected from a name or owner/name source
 }
 
-// parseInstallSource classifies the install argument. A path must be explicit
-// (a separator or leading .) so a stray local file never shadows an index name.
+// parseInstallSource classifies the install argument:
+//
+//	digisac            -> https://github.com/mguilarducci/mf-digisac
+//	owner/name         -> https://github.com/owner/mf-name (mf- prefix optional)
+//	https://…, git@…   -> that repository
+//	./x, ../x, /x      -> a local executable
+//
+// owner/name and a relative path look alike, so paths must start with ./,
+// ../ or /, and an owner/name that also exists as a local file is refused
+// rather than guessed.
 func parseInstallSource(arg string) (installSource, error) {
 	if strings.HasPrefix(arg, "-") {
 		return installSource{}, fmt.Errorf("install source %q must not start with '-'", arg)
@@ -56,45 +77,75 @@ func parseInstallSource(arg string) (installSource, error) {
 			return installSource{}, err
 		}
 		return installSource{Kind: installFromURL, Ref: arg}, nil
-	case strings.ContainsAny(arg, `/\`) || strings.HasPrefix(arg, "."):
+	case strings.HasPrefix(arg, "./") || strings.HasPrefix(arg, "../") || filepath.IsAbs(arg) ||
+		arg == "." || strings.HasPrefix(arg, `.\`) || strings.HasPrefix(arg, `..\`):
 		return installSource{Kind: installFromPath, Ref: arg}, nil
+	case ownerNameRe.MatchString(arg):
+		if _, err := os.Stat(arg); err == nil {
+			return installSource{}, fmt.Errorf("%q is both a local file and an owner/name; use ./%s for the file or the full repository URL", arg, arg)
+		}
+		m := ownerNameRe.FindStringSubmatch(arg)
+		name := strings.TrimPrefix(m[2], pluginBinaryPrefix)
+		if err := validatePluginName(name); err != nil {
+			return installSource{}, err
+		}
+		return installSource{Kind: installFromRepo, Ref: conventionRepoURL(m[1], name), Name: name}, nil
+	case strings.ContainsAny(arg, `/\`):
+		return installSource{}, fmt.Errorf("%q is neither owner/name nor an explicit path; local paths start with ./, ../ or /", arg)
 	default:
 		if err := validatePluginName(arg); err != nil {
 			return installSource{}, err
 		}
-		return installSource{Kind: installFromIndex, Ref: arg}, nil
+		return installSource{Kind: installFromRepo, Ref: conventionRepoURL(defaultPluginOwner, arg), Name: arg}, nil
 	}
 }
 
+func conventionRepoURL(owner, name string) string {
+	return pluginForgeURL + "/" + owner + "/" + pluginBinaryPrefix + name
+}
+
+// trustedRepo reports whether repoURL belongs to the default owner, whose
+// plugins install without a confirmation prompt.
+func trustedRepo(repoURL string) bool {
+	return strings.HasPrefix(normalizeRepoURL(repoURL)+"/", pluginForgeURL+"/"+defaultPluginOwner+"/")
+}
+
+func normalizeRepoURL(u string) string {
+	return strings.TrimSuffix(strings.TrimRight(strings.TrimSpace(u), "/"), ".git")
+}
+
 type installFlags struct {
-	name, pin, index            string
+	name, pin                   string
 	force, yes, allowUnverified bool
 }
 
 func newPluginInstallCmd() *cobra.Command {
 	var f installFlags
 	cmd := &cobra.Command{
-		Use:   "install <name|url|path>",
-		Short: "Install a plugin from the index, a git repository URL, or a local executable",
+		Use:   "install <name|owner/name|url|path>",
+		Short: "Install a plugin from a git repository or a local executable",
 		Long: `Install a plugin.
 
-Three source forms:
+Source forms:
 
-  name   Bare names resolve through the plugin index:
-             mf plugin install digisac
-  url    Git repository URLs install from any forge. The newest stable semver
-         tag is resolved with 'git ls-remote'; the platform's release asset is
-         downloaded over HTTPS and verified against the release's
-         checksums.txt. A release without checksums is refused unless
-         --allow-unverified is passed:
-             mf plugin install https://github.com/mguilarducci/mf-digisac
-  path   Local executables are linked into the managed directory (a symlink,
-         so rebuilds are picked up). Paths must be explicit, with a separator
-         or leading ./, so a stray local file can never shadow an index name:
-             mf plugin install ./bin/mf-digisac
+  name        A plugin of the default owner (` + defaultPluginOwner + `):
+                  mf plugin install digisac      # github.com/` + defaultPluginOwner + `/mf-digisac
+  owner/name  A plugin repository named mf-<name> on GitHub:
+                  mf plugin install someone/foo  # github.com/someone/mf-foo
+  url         Any git repository URL:
+                  mf plugin install https://github.com/` + defaultPluginOwner + `/mf-digisac
+  path        A local executable, linked into the managed directory (a
+              symlink, so rebuilds are picked up). Paths start with ./, ../
+              or /, so they can't be mistaken for owner/name:
+                  mf plugin install ./bin/mf-digisac
 
-Installing from a URL that is not in the plugin index asks for
-confirmation; pass --yes to skip (required in non-interactive runs).`,
+For a repository, the newest stable semver tag is resolved with
+'git ls-remote', and the platform's release asset is downloaded over HTTPS
+and verified against the release's checksums.txt. A release without
+checksums is refused unless --allow-unverified is passed.
+
+Repositories outside ` + defaultPluginOwner + ` ask for confirmation first; pass --yes to
+skip (required in non-interactive runs).`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			src, err := parseInstallSource(args[0])
@@ -118,9 +169,8 @@ confirmation; pass --yes to skip (required in non-interactive runs).`,
 	}
 	cmd.Flags().StringVar(&f.name, "name", "", "Plugin name for a local path (default: file name without mf- prefix)")
 	cmd.Flags().BoolVar(&f.force, "force", false, "Replace an existing plugin with the same name")
-	cmd.Flags().BoolVar(&f.yes, "yes", false, "Skip the confirmation for sources outside the plugin index")
+	cmd.Flags().BoolVar(&f.yes, "yes", false, "Skip the confirmation for repositories outside "+defaultPluginOwner)
 	cmd.Flags().StringVar(&f.pin, "pin", "", "Install exactly this tag")
-	cmd.Flags().StringVar(&f.index, "index", "", "Plugin index URL (overrides "+pluginIndexEnvVar+" and the built-in default)")
 	cmd.Flags().BoolVar(&f.allowUnverified, "allow-unverified", false,
 		"Install even when the release publishes no "+checksumsFileName+" to authenticate the download")
 	return cmd
@@ -128,31 +178,16 @@ confirmation; pass --yes to skip (required in non-interactive runs).`,
 
 func runRemoteInstall(cmd *cobra.Command, src installSource, f installFlags) error {
 	ctx := cmd.Context()
-	indexURL := resolvePluginIndexURL(f.index)
-	repoURL, expectedName := src.Ref, ""
+	repoURL, expectedName := src.Ref, src.Name
 
-	if src.Kind == installFromIndex {
-		idx, err := SyncPluginIndex(ctx, indexURL, false)
+	if !f.yes && !trustedRepo(repoURL) {
+		// Code from wherever the user pointed: confirm before running it.
+		ok, err := confirm(cmd, "Install and run plugin code from "+redactURL(repoURL)+"?")
 		if err != nil {
 			return fmt.Errorf("install plugin: %w", err)
 		}
-		entry := idx.Find(src.Ref)
-		if entry == nil {
-			return fmt.Errorf("install plugin: %q is %w at %s; install by URL or path instead",
-				src.Ref, errNotInIndex, redactURL(indexURL))
-		}
-		repoURL, expectedName = entry.RepoURL, entry.Name
-	} else if !f.yes {
-		// An unindexed URL is code from wherever the user typed: confirm.
-		idx, err := SyncPluginIndex(ctx, indexURL, false)
-		if err != nil || idx.FindByRepoURL(repoURL) == nil {
-			ok, err := confirm(cmd, redactURL(repoURL)+" is not in the plugin index. Install and run code from it?")
-			if err != nil {
-				return fmt.Errorf("install plugin: %w", err)
-			}
-			if !ok {
-				return errors.New("install plugin: cancelled")
-			}
+		if !ok {
+			return errors.New("install plugin: cancelled")
 		}
 	}
 
@@ -202,7 +237,7 @@ func newPluginListCmd() *cobra.Command {
 				return enc.Encode(plugins)
 			}
 			if len(plugins) == 0 {
-				fmt.Fprintln(cmd.ErrOrStderr(), "No plugins found. Install one with: mf plugin install <name|url|path>")
+				fmt.Fprintln(cmd.ErrOrStderr(), "No plugins found. Install one with: mf plugin install <name|owner/name|url|path>")
 				return nil
 			}
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
