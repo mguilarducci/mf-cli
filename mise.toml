@@ -2,7 +2,7 @@
 go = "1.27.4"
 
 [tasks.build]
-run = "go build -o bin/mf ./cmd/mf-cli"
+run = "go build -o bin/mf ./cmd/mf"
 
 [tasks.test]
 run = "go test ./..."

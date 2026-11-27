@@ -7,5 +7,5 @@ Their full license texts are in third_party/licenses/.
 - entireio/cli (https://github.com/entireio/cli)
   Copyright (c) 2026 Entire Inc.
   MIT License: third_party/licenses/entireio-cli.LICENSE
-  Used in: cmd/mf-cli/cli/plugin*.go (kubectl-style plugin dispatch,
+  Used in: cmd/mf/cli/plugin*.go (kubectl-style plugin dispatch,
   managed plugin store, plugin environment allowlist, plugin help section).
