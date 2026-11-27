@@ -128,7 +128,7 @@ func TestInstallListRemove(t *testing.T) {
 
 	src := writeExecutable(t, filepath.Join(t.TempDir(), "mf-hello"))
 
-	dst, err := installLocalPlugin(src, pluginNameFromPath(src))
+	dst, err := installLocalPlugin(src, pluginNameFromPath(src), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,8 +142,11 @@ func TestInstallListRemove(t *testing.T) {
 		t.Fatalf("discoverPlugins() = %+v", plugins)
 	}
 
-	// Reinstalling replaces the entry instead of failing.
-	if _, err := installLocalPlugin(src, "hello"); err != nil {
+	// Reinstalling needs --force.
+	if _, err := installLocalPlugin(src, "hello", false); err == nil {
+		t.Fatal("reinstall without force: want error")
+	}
+	if _, err := installLocalPlugin(src, "hello", true); err != nil {
 		t.Fatalf("reinstall: %v", err)
 	}
 
@@ -164,7 +167,7 @@ func TestInstallRejectsNonExecutable(t *testing.T) {
 	if err := os.WriteFile(src, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := installLocalPlugin(src, "data"); err == nil {
+	if _, err := installLocalPlugin(src, "data", false); err == nil {
 		t.Error("want error for non-executable file")
 	}
 }
