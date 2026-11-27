@@ -1,18 +1,23 @@
 # Changelog
 
-All notable changes to this project are documented here. The format is based
-on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
-adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+All notable changes to this project will be documented in this file.
 
-The release workflow publishes the section matching the pushed tag as the
-GitHub release notes, so add one before running `mise run release vX.Y.Z`.
+The format is based on [Keep a Changelog](https://keepachangelog.com/),
+and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
-
-## [0.1.0]
+## [0.1.0] - 2026-11-27
 
 ### Added
 
-- `mf <name>` runs an `mf-<name>` plugin from PATH, kubectl-style.
-- `mf plugin install|list|remove` to manage plugins in `~/.local/share/mf/plugins`.
-- Plugins listed under "Plugin Commands" in `mf --help`.
+- `mf <name>` runs an `mf-<name>` executable from PATH, kubectl-style, passing through arguments, stdio and the exit code. Plugins get an allowlisted environment plus variables prefixed with their own name (`DIGISAC_*` for `mf-digisac`), and `MF_PLUGIN_ENV` passes extra ones ([#2](https://github.com/mguilarducci/mf-cli/pull/2))
+- `mf plugin install|list|remove` manages plugins in `~/.local/share/mf/plugins`. Installs are symlinks, so rebuilding a plugin updates it, and installed plugins are listed under "Plugin Commands:" in `mf --help` ([#2](https://github.com/mguilarducci/mf-cli/pull/2))
+- `scripts/install.sh` installs the latest release into `~/.local/bin`, verified against the release checksums ([#3](https://github.com/mguilarducci/mf-cli/pull/3))
+
+### Fixed
+
+- Plugins are found and installed on Windows, by `PATHEXT` extension instead of the executable bit ([#3](https://github.com/mguilarducci/mf-cli/pull/3))
+
+### Housekeeping
+
+- The Digisac plugin moved to its own repository, [mf-digisac](https://github.com/mguilarducci/mf-digisac) ([#1](https://github.com/mguilarducci/mf-cli/pull/1))
+- Layout, mise tasks, lint, CI and GoReleaser release pipeline follow entireio/cli ([#3](https://github.com/mguilarducci/mf-cli/pull/3))

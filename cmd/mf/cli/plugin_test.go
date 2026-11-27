@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -89,12 +90,14 @@ func TestPluginEnvPrefix(t *testing.T) {
 
 func TestPluginDirs(t *testing.T) {
 	t.Setenv("MF_PLUGIN_DIR", "")
-	t.Setenv("XDG_DATA_HOME", "/xdg")
-	if got, err := PluginBinDir(); err != nil || got != "/xdg/mf/plugins/bin" {
+	xdg := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", xdg)
+	if got, err := PluginBinDir(); err != nil || got != filepath.Join(xdg, "mf", "plugins", "bin") {
 		t.Errorf("PluginBinDir() = %q, %v", got, err)
 	}
-	t.Setenv("MF_PLUGIN_DIR", "/custom")
-	if got, err := PluginDataDir("digisac"); err != nil || got != "/custom/data/digisac" {
+	custom := t.TempDir()
+	t.Setenv("MF_PLUGIN_DIR", custom)
+	if got, err := PluginDataDir("digisac"); err != nil || got != filepath.Join(custom, "data", "digisac") {
 		t.Errorf("PluginDataDir() = %q, %v", got, err)
 	}
 	if _, err := PluginDataDir("../escape"); err == nil {
@@ -102,12 +105,19 @@ func TestPluginDirs(t *testing.T) {
 	}
 }
 
-// writeExecutable creates a tiny shell script plugin.
-func writeExecutable(t *testing.T, path string) {
+// writeExecutable creates a tiny no-op plugin at path (path.bat on Windows)
+// and returns the path it wrote.
+func writeExecutable(t *testing.T, path string) string {
 	t.Helper()
-	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+	body := "#!/bin/sh\nexit 0\n"
+	if runtime.GOOS == windowsGOOS {
+		path += ".bat"
+		body = "@exit /b 0\r\n"
+	}
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	return path
 }
 
 func TestInstallListRemove(t *testing.T) {
@@ -116,14 +126,14 @@ func TestInstallListRemove(t *testing.T) {
 	t.Setenv("PATH", "")
 	PrependPluginBinDirToPATH()
 
-	src := filepath.Join(t.TempDir(), "mf-hello")
-	writeExecutable(t, src)
+	src := writeExecutable(t, filepath.Join(t.TempDir(), "mf-hello"))
 
-	dst, err := installLocalPlugin(src, pluginNameFromPath(src))
+	dst, err := installLocalPlugin(src, pluginNameFromPath(src), false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if target, err := os.Readlink(dst); err != nil || target != src {
+	// Symlinks need extra privileges on Windows, where install falls back to a copy.
+	if target, err := os.Readlink(dst); runtime.GOOS != windowsGOOS && (err != nil || target != src) {
 		t.Errorf("install should symlink to %q, got %q (%v)", src, target, err)
 	}
 
@@ -132,8 +142,11 @@ func TestInstallListRemove(t *testing.T) {
 		t.Fatalf("discoverPlugins() = %+v", plugins)
 	}
 
-	// Reinstalling replaces the entry instead of failing.
-	if _, err := installLocalPlugin(src, "hello"); err != nil {
+	// Reinstalling needs --force.
+	if _, err := installLocalPlugin(src, "hello", false); err == nil {
+		t.Fatal("reinstall without force: want error")
+	}
+	if _, err := installLocalPlugin(src, "hello", true); err != nil {
 		t.Fatalf("reinstall: %v", err)
 	}
 
@@ -154,7 +167,7 @@ func TestInstallRejectsNonExecutable(t *testing.T) {
 	if err := os.WriteFile(src, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := installLocalPlugin(src, "data"); err == nil {
+	if _, err := installLocalPlugin(src, "data", false); err == nil {
 		t.Error("want error for non-executable file")
 	}
 }

@@ -22,6 +22,8 @@ import (
 // Stdio and exit codes pass through.
 const pluginBinaryPrefix = "mf-"
 
+const windowsGOOS = "windows"
+
 // MaybeRunPlugin returns (true, exitCode) when a plugin was resolved and run,
 // and (false, 0) when the caller should fall through to Cobra.
 func MaybeRunPlugin(ctx context.Context, root *cobra.Command, args []string) (handled bool, exitCode int) {
