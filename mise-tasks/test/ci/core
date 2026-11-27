@@ -1,0 +1,8 @@
+#!/bin/sh
+#MISE description="Run Go tests with race detection for CI"
+
+set -eu
+
+parallel="${GO_TEST_PARALLEL:-16}"
+
+go test -race -parallel="$parallel" ./...

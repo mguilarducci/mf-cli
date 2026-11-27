@@ -1,0 +1,53 @@
+# Adapted from entireio/cli (MIT, see NOTICE).
+name: Tests
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: jdx/mise-action@f10502fc09dadecfefb962fff68ce77213930204 # v4
+      - name: Core Tests
+        env:
+          GO_TEST_PARALLEL: "16"
+        run: mise run test:ci:core
+
+  test-windows:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Windows unit tests
+        run: go test ./... -count=1
+
+  # Single required status check: branch protection points at this job, so
+  # adding or renaming a job above never needs a settings change.
+  test:
+    runs-on: ubuntu-latest
+    permissions: {}
+    needs:
+      - test-core
+      - test-windows
+    if: ${{ always() }}
+    steps:
+      - name: Check dependencies
+        run: |
+          [ "${{ needs.test-core.result }}" = "success" ]
+          [ "${{ needs.test-windows.result }}" = "success" ]

@@ -5,10 +5,9 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-)
 
-// Version will be linked by an ldflag during build.
-var Version = "v0.1.0-dev"
+	"github.com/mguilarducci/mf-cli/cmd/mf/cli/versioninfo"
+)
 
 // NewRootCmd builds the `mf` command tree. Plugins are not part of it: they
 // are resolved by MaybeRunPlugin before Cobra runs, and only listed in help.
@@ -16,10 +15,10 @@ func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "mf",
 		Short:         "mf aggregates CLI plugins under a single command.",
-		Version:       Version,
+		Version:       versioninfo.Version + " (" + versioninfo.Commit + ")",
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		Run:           func(cmd *cobra.Command, args []string) { _ = cmd.Help() },
+		RunE:          func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
 	root.AddCommand(newPluginGroupCmd())
 	usePluginCommandsInRootHelp(root)

@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -34,7 +36,7 @@ func pluginParentDir() (string, error) {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("resolve home dir: %w", err)
 	}
 	return filepath.Join(home, ".local", "share", "mf", "plugins"), nil
 }
@@ -89,9 +91,53 @@ func validatePluginName(name string) error {
 }
 
 // pluginNameFromPath derives a plugin name from a binary path:
-// ./bin/mf-digisac -> digisac.
+// ./bin/mf-digisac -> digisac, and on Windows mf-digisac.exe -> digisac.
 func pluginNameFromPath(path string) string {
-	return strings.TrimPrefix(filepath.Base(path), pluginBinaryPrefix)
+	base := filepath.Base(path)
+	if runtime.GOOS == windowsGOOS && isWindowsExecExt(filepath.Ext(base)) {
+		base = strings.TrimSuffix(base, filepath.Ext(base))
+	}
+	return strings.TrimPrefix(base, pluginBinaryPrefix)
+}
+
+// isExecutableFile reports whether path can be run as a plugin. Windows has
+// no executable bit, so it goes by extension (PATHEXT), like exec.LookPath.
+func isExecutableFile(path string, info os.FileInfo) bool {
+	if info.IsDir() {
+		return false
+	}
+	if runtime.GOOS == windowsGOOS {
+		return isWindowsExecExt(filepath.Ext(path))
+	}
+	return info.Mode().Perm()&0o111 != 0
+}
+
+func isWindowsExecExt(ext string) bool {
+	return ext != "" && slices.Contains(windowsExecExts(), strings.ToLower(ext))
+}
+
+func windowsExecExts() []string {
+	pathext := os.Getenv("PATHEXT")
+	if pathext == "" {
+		pathext = ".com;.exe;.bat;.cmd"
+	}
+	var exts []string
+	for _, e := range strings.Split(strings.ToLower(pathext), ";") {
+		if e != "" {
+			exts = append(exts, e)
+		}
+	}
+	return exts
+}
+
+// managedBinaryName is the file name a plugin gets in the managed bin dir.
+// On Windows it keeps the source's extension (.exe, .bat, ...) so
+// exec.LookPath can still find it through PATHEXT.
+func managedBinaryName(name, src string) string {
+	if runtime.GOOS == windowsGOOS {
+		return pluginBinaryPrefix + name + strings.ToLower(filepath.Ext(src))
+	}
+	return pluginBinaryPrefix + name
 }
 
 // installLocalPlugin links src into the managed bin dir as mf-<name>.
@@ -103,13 +149,13 @@ func installLocalPlugin(src, name string) (string, error) {
 	}
 	abs, err := filepath.Abs(src)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("resolve %s: %w", src, err)
 	}
 	info, err := os.Stat(abs)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("stat plugin: %w", err)
 	}
-	if info.IsDir() || info.Mode().Perm()&0o111 == 0 {
+	if !isExecutableFile(abs, info) {
 		return "", fmt.Errorf("%s is not an executable file", src)
 	}
 
@@ -117,12 +163,12 @@ func installLocalPlugin(src, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := os.MkdirAll(binDir, 0o755); err != nil {
-		return "", err
+	if err := os.MkdirAll(binDir, 0o750); err != nil {
+		return "", fmt.Errorf("create plugin dir: %w", err)
 	}
-	dst := filepath.Join(binDir, pluginBinaryPrefix+name)
+	dst := filepath.Join(binDir, managedBinaryName(name, abs))
 	if err := os.Remove(dst); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return "", err
+		return "", fmt.Errorf("replace existing plugin: %w", err)
 	}
 	if err := os.Symlink(abs, dst); err == nil {
 		return dst, nil
@@ -130,21 +176,25 @@ func installLocalPlugin(src, name string) (string, error) {
 	return dst, copyExecutable(abs, dst)
 }
 
-func copyExecutable(src, dst string) error {
-	in, err := os.Open(src)
+func copyExecutable(src, dst string) (err error) {
+	in, err := os.Open(src) //nolint:gosec // src is the path the user asked to install
 	if err != nil {
-		return err
+		return fmt.Errorf("open plugin: %w", err)
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
+	//nolint:gosec // dst is inside the managed bin dir; plugins must be executable
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
 	if err != nil {
-		return err
+		return fmt.Errorf("create plugin copy: %w", err)
 	}
 	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		return err
+		_ = out.Close()
+		return fmt.Errorf("copy plugin: %w", err)
 	}
-	return out.Close()
+	if err := out.Close(); err != nil {
+		return fmt.Errorf("write plugin copy: %w", err)
+	}
+	return nil
 }
 
 // removePlugin deletes the managed entry for name. Data is kept unless purge.
@@ -156,18 +206,34 @@ func removePlugin(name string, purge bool) error {
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(filepath.Join(binDir, pluginBinaryPrefix+name)); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("plugin %q is not installed in %s", name, binDir)
+	candidates := []string{pluginBinaryPrefix + name}
+	if runtime.GOOS == windowsGOOS {
+		candidates = nil
+		for _, ext := range windowsExecExts() {
+			candidates = append(candidates, pluginBinaryPrefix+name+ext)
 		}
-		return err
+	}
+	removed := false
+	for _, c := range candidates {
+		err := os.Remove(filepath.Join(binDir, c))
+		switch {
+		case err == nil:
+			removed = true
+		case !errors.Is(err, os.ErrNotExist):
+			return fmt.Errorf("remove plugin: %w", err)
+		}
+	}
+	if !removed {
+		return fmt.Errorf("plugin %q is not installed in %s", name, binDir)
 	}
 	if purge {
 		dataDir, err := PluginDataDir(name)
 		if err != nil {
 			return err
 		}
-		return os.RemoveAll(dataDir)
+		if err := os.RemoveAll(dataDir); err != nil {
+			return fmt.Errorf("remove plugin data: %w", err)
+		}
 	}
 	return nil
 }
@@ -182,7 +248,10 @@ type pluginEntry struct {
 // discoverPlugins lists every mf-<name> executable on PATH, first match wins,
 // sorted by name. Managed entries are flagged.
 func discoverPlugins() []pluginEntry {
-	binDir, _ := PluginBinDir()
+	binDir, err := PluginBinDir()
+	if err != nil {
+		binDir = "" // no managed dir: every entry is a plain PATH plugin
+	}
 	seen := map[string]bool{}
 	var out []pluginEntry
 	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
@@ -199,12 +268,15 @@ func discoverPlugins() []pluginEntry {
 				continue
 			}
 			path := filepath.Join(dir, e.Name())
-			info, err := os.Stat(path) // follows symlinks
-			if err != nil || info.IsDir() || info.Mode().Perm()&0o111 == 0 {
+			info, err := os.Stat(path) //nolint:gosec // path is a PATH entry joined with a validated mf-<name>
+			if err != nil || !isExecutableFile(path, info) {
 				continue
 			}
 			seen[name] = true
-			target, _ := os.Readlink(path)
+			target, err := os.Readlink(path)
+			if err != nil {
+				target = "" // not a symlink
+			}
 			out = append(out, pluginEntry{Name: name, Path: path, Target: target, Managed: dir == binDir})
 		}
 	}
