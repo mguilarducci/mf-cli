@@ -1,3 +1,7 @@
+// Portions adapted from entireio/cli (https://github.com/entireio/cli),
+// Copyright (c) 2026 Entire Inc., MIT License.
+// See third_party/licenses/entireio-cli.LICENSE.
+
 package registry
 
 import (

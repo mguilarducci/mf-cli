@@ -10,8 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
-	"strings"
 )
 
 // Managed plugin storage. The Plugin registry resolves `mf-<name>` on its
@@ -36,43 +34,6 @@ func pluginParentDir() (string, error) {
 		return "", fmt.Errorf("resolve home dir: %w", err)
 	}
 	return filepath.Join(home, ".local", "share", "mf", "plugins"), nil
-}
-
-// PluginBinDir returns the managed install directory.
-func PluginBinDir() (string, error) {
-	parent, err := pluginParentDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(parent, "bin"), nil
-}
-
-// pluginNameFromPath derives a plugin name from a binary path:
-// ./bin/mf-digisac -> digisac, and on Windows mf-digisac.exe -> digisac.
-func pluginNameFromPath(path string) string {
-	base := filepath.Base(path)
-	if runtime.GOOS == windowsGOOS && isWindowsExecExt(filepath.Ext(base)) {
-		base = strings.TrimSuffix(base, filepath.Ext(base))
-	}
-	return strings.TrimPrefix(base, pluginBinaryPrefix)
-}
-
-func isWindowsExecExt(ext string) bool {
-	return ext != "" && slices.Contains(windowsExecExts(), strings.ToLower(ext))
-}
-
-func windowsExecExts() []string {
-	pathext := os.Getenv("PATHEXT")
-	if pathext == "" {
-		pathext = ".com;.exe;.bat;.cmd"
-	}
-	var exts []string
-	for _, e := range strings.Split(strings.ToLower(pathext), ";") {
-		if e != "" {
-			exts = append(exts, e)
-		}
-	}
-	return exts
 }
 
 func isWindows() bool { return runtime.GOOS == windowsGOOS }

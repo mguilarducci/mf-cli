@@ -13,19 +13,6 @@ import (
 	"github.com/mguilarducci/mf-cli/cmd/mf/internal/registry"
 )
 
-func TestPluginNameFromPath(t *testing.T) {
-	cases := map[string]string{
-		"./bin/mf-digisac": "digisac",
-		"/x/mf-my-tool":    "my-tool",
-		"plain":            "plain",
-	}
-	for in, want := range cases {
-		if got := pluginNameFromPath(in); got != want {
-			t.Errorf("pluginNameFromPath(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 func TestPluginEnv(t *testing.T) {
 	parent := []string{
 		"PATH=/bin",
@@ -69,17 +56,6 @@ func TestPluginEnvPrefix(t *testing.T) {
 	}
 }
 
-func TestPluginBinDir(t *testing.T) {
-	t.Setenv("MF_PLUGIN_DIR", "")
-	xdg := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", xdg)
-	if got, err := PluginBinDir(); err != nil || got != filepath.Join(xdg, "mf", "plugins", "bin") {
-		t.Errorf("PluginBinDir() = %q, %v", got, err)
-	}
-}
-
-// writeExecutable creates a tiny no-op plugin at path (path.bat on Windows)
-// and returns the path it wrote.
 func writeExecutable(t *testing.T, path string) string {
 	t.Helper()
 	return writeScript(t, path, "exit 0\n", "exit /b 0\r\n")

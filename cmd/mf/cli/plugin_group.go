@@ -90,7 +90,7 @@ func parseInstallSource(arg string) (installSource, error) {
 			return installSource{}, fmt.Errorf("%q is both a local file and an owner/name; use ./%s for the file or the full repository URL", arg, arg)
 		}
 		m := ownerNameRe.FindStringSubmatch(arg)
-		name := strings.TrimPrefix(m[2], pluginBinaryPrefix)
+		name := strings.TrimPrefix(m[2], registry.BinaryPrefix)
 		if err := registry.ValidateName(name); err != nil {
 			return installSource{}, err
 		}
@@ -106,7 +106,7 @@ func parseInstallSource(arg string) (installSource, error) {
 }
 
 func conventionRepoURL(owner, name string) string {
-	return pluginForgeURL + "/" + owner + "/" + pluginBinaryPrefix + name
+	return pluginForgeURL + "/" + owner + "/" + registry.BinaryPrefix + name
 }
 
 // trustedRepo reports whether repoURL belongs to the default owner, whose
@@ -140,7 +140,7 @@ Source forms:
                   mf plugin install someone/foo  # github.com/someone/mf-foo
   url         Any git repository URL:
                   mf plugin install https://github.com/` + defaultPluginOwner + `/mf-digisac
-  path        A local executable, linked into the managed directory (a
+  path        A local executable, linked into the Plugin registry (a
               symlink, so rebuilds are picked up). Paths start with ./, ../
               or /, so they can't be mistaken for owner/name:
                   mf plugin install ./bin/mf-digisac
@@ -161,7 +161,7 @@ skip (required in non-interactive runs).`,
 			if src.Kind == installFromPath {
 				name := f.name
 				if name == "" {
-					name = pluginNameFromPath(src.Ref)
+					name = reg.NameFromPath(src.Ref)
 				}
 				dst, err := reg.InstallLocal(src.Ref, name, f.force)
 				if err != nil {
@@ -281,7 +281,7 @@ func newPluginListCmd(reg *registry.Registry) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls"},
-		Short:   "List plugins found in the managed dir and on PATH",
+		Short:   "List plugins on the Search path: the Plugin registry, then PATH",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			plugins := reg.List()
 			if output == "json" {
@@ -322,7 +322,7 @@ func newPluginRemoveCmd(reg *registry.Registry) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "remove <name>",
 		Aliases: []string{"rm", "uninstall"},
-		Short:   "Remove a plugin from the managed dir",
+		Short:   "Remove a managed plugin from the Plugin registry",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := reg.Remove(args[0], purge); err != nil {

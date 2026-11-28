@@ -166,11 +166,11 @@ func pluginNameFromRepoURL(repoURL string) (string, error) {
 	if i := strings.LastIndexAny(trimmed, "/:"); i >= 0 {
 		base = trimmed[i+1:]
 	}
-	if !strings.HasPrefix(base, pluginBinaryPrefix) {
+	if !strings.HasPrefix(base, registry.BinaryPrefix) {
 		return "", fmt.Errorf("repository basename %q does not start with %q; declare a name in %s",
-			base, pluginBinaryPrefix, pluginMetadataFileName)
+			base, registry.BinaryPrefix, pluginMetadataFileName)
 	}
-	name := strings.TrimPrefix(base, pluginBinaryPrefix)
+	name := strings.TrimPrefix(base, registry.BinaryPrefix)
 	if err := registry.ValidateName(name); err != nil {
 		return "", err
 	}

@@ -14,7 +14,8 @@ import (
 	"strings"
 )
 
-const binaryPrefix = "mf-"
+// BinaryPrefix starts the file name of every Plugin: mf-<name>.
+const BinaryPrefix = "mf-"
 
 // CanInstall reports whether name can be installed: it refuses an existing
 // Managed plugin unless force, naming where it is installed. It never
@@ -40,11 +41,11 @@ func (r *Registry) entries(name string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	candidates := []string{binaryPrefix + name}
+	candidates := []string{BinaryPrefix + name}
 	if r.isWindows() {
 		candidates = nil
 		for _, ext := range r.pathExts() {
-			candidates = append(candidates, binaryPrefix+name+ext)
+			candidates = append(candidates, BinaryPrefix+name+ext)
 		}
 	}
 	var out []string
@@ -192,9 +193,9 @@ func copyExecutable(src, dst string) (err error) {
 // keeps the source's extension (.exe, .bat, ...) so PATHEXT lookup finds it.
 func (r *Registry) entryName(name, src string) string {
 	if r.isWindows() {
-		return binaryPrefix + name + strings.ToLower(filepath.Ext(src))
+		return BinaryPrefix + name + strings.ToLower(filepath.Ext(src))
 	}
-	return binaryPrefix + name
+	return BinaryPrefix + name
 }
 
 // isExecutable reports whether path can be run as a plugin. Windows has no

@@ -81,7 +81,7 @@ func installRepoAtTag(ctx context.Context, reg *registry.Registry, repoURL, expe
 	}
 	defer func() { _ = os.RemoveAll(staging) }()
 
-	step(opts.Progress, "Downloading %s%s %s", pluginBinaryPrefix, name, tag)
+	step(opts.Progress, "Downloading %s%s %s", registry.BinaryPrefix, name, tag)
 	asset, err := downloadPluginAsset(ctx, meta, repoURL, name, tag, staging, opts.AllowUnverified)
 	if err != nil {
 		return nil, err
@@ -166,9 +166,9 @@ func placeStagedBinary(reg *registry.Registry, staged string, m *PluginManifest,
 // pluginBinaryName is the on-disk executable name for a plugin.
 func pluginBinaryName(name string) string {
 	if isWindows() {
-		return pluginBinaryPrefix + name + ".exe"
+		return registry.BinaryPrefix + name + ".exe"
 	}
-	return pluginBinaryPrefix + name
+	return registry.BinaryPrefix + name
 }
 
 func step(w io.Writer, format string, args ...any) {

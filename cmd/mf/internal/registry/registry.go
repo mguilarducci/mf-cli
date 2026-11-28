@@ -1,6 +1,6 @@
-// Package registry is the Plugin registry: where Managed plugins live and,
-// in later steps, how a name resolves to a Plugin. It is built once from an
-// explicit Env snapshot and never reads or changes the process environment.
+// Package registry is the Plugin registry: where Managed plugins live and
+// how a name resolves to a Plugin on the Search path. It is built once from
+// an explicit Env snapshot and never reads or changes the process environment.
 package registry
 
 import (

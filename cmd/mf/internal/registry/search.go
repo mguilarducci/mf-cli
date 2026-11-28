@@ -1,8 +1,13 @@
+// Portions adapted from entireio/cli (https://github.com/entireio/cli),
+// Copyright (c) 2026 Entire Inc., MIT License.
+// See third_party/licenses/entireio-cli.LICENSE.
+
 package registry
 
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -67,7 +72,7 @@ func (r *Registry) List() []Plugin {
 			continue
 		}
 		for _, e := range entries {
-			name, ok := strings.CutPrefix(e.Name(), binaryPrefix)
+			name, ok := strings.CutPrefix(e.Name(), BinaryPrefix)
 			if !ok {
 				continue
 			}
@@ -91,7 +96,7 @@ func (r *Registry) List() []Plugin {
 // executable regular file mf-<name>. On Windows it is mf-<name><ext>, trying
 // each PATHEXT extension in order, as exec.LookPath does.
 func (r *Registry) findIn(dir, name string) (string, bool) {
-	base := filepath.Join(dir, binaryPrefix+name)
+	base := filepath.Join(dir, BinaryPrefix+name)
 	candidates := []string{base}
 	if r.isWindows() {
 		candidates = nil
@@ -105,6 +110,17 @@ func (r *Registry) findIn(dir, name string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// NameFromPath derives a plugin name from an executable's path, the inverse
+// of the lookup rule: ./bin/mf-digisac -> digisac, and on Windows
+// mf-digisac.exe -> digisac when the extension is in PATHEXT.
+func (r *Registry) NameFromPath(path string) string {
+	base := filepath.Base(path)
+	if ext := strings.ToLower(filepath.Ext(base)); r.isWindows() && ext != "" && slices.Contains(r.pathExts(), ext) {
+		base = strings.TrimSuffix(base, filepath.Ext(base))
+	}
+	return strings.TrimPrefix(base, BinaryPrefix)
 }
 
 // pathExts is PATHEXT normalized like exec.LookPath: lower case, each with a

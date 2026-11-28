@@ -22,7 +22,6 @@ import (
 // When the user invokes `mf <name>` and <name> isn't a built-in subcommand,
 // the Plugin registry resolves `mf-<name>` on its Search path and it runs
 // with the remaining args. Stdio and exit codes pass through.
-const pluginBinaryPrefix = "mf-"
 
 const windowsGOOS = "windows"
 
@@ -75,7 +74,7 @@ func runPlugin(ctx context.Context, reg *registry.Registry, plugin registry.Plug
 		if errors.As(err, &exitErr) {
 			return exitErr.ExitCode()
 		}
-		fmt.Fprintf(os.Stderr, "Failed to run plugin %s: %v\n", pluginBinaryPrefix+name, err)
+		fmt.Fprintf(os.Stderr, "Failed to run plugin %s: %v\n", registry.BinaryPrefix+name, err)
 		return 1
 	}
 	return 0
