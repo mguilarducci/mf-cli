@@ -23,7 +23,7 @@ import (
 	"github.com/mguilarducci/mf-cli/cmd/mf/internal/registry"
 )
 
-func newPluginGroupCmd(_ *registry.Registry) *cobra.Command {
+func newPluginGroupCmd(reg *registry.Registry) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "plugin",
 		Aliases: []string{"plugins"},
@@ -32,7 +32,7 @@ func newPluginGroupCmd(_ *registry.Registry) *cobra.Command {
 with 'mf plugin install', and run it as 'mf <name>'.`,
 		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
-	cmd.AddCommand(newPluginInstallCmd(), newPluginListCmd(), newPluginRemoveCmd())
+	cmd.AddCommand(newPluginInstallCmd(reg), newPluginListCmd(), newPluginRemoveCmd(reg))
 	return cmd
 }
 
@@ -124,7 +124,7 @@ type installFlags struct {
 	force, yes, allowUnverified bool
 }
 
-func newPluginInstallCmd() *cobra.Command {
+func newPluginInstallCmd(reg *registry.Registry) *cobra.Command {
 	var f installFlags
 	cmd := &cobra.Command{
 		Use:   "install <name|owner/name|url|path>",
@@ -163,14 +163,14 @@ skip (required in non-interactive runs).`,
 				if name == "" {
 					name = pluginNameFromPath(src.Ref)
 				}
-				dst, err := installLocalPlugin(src.Ref, name, f.force)
+				dst, err := reg.InstallLocal(src.Ref, name, f.force)
 				if err != nil {
 					return fmt.Errorf("install plugin: %w", err)
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "Installed plugin %q → %s\n", name, dst)
 				return nil
 			}
-			return runRemoteInstall(cmd, src, f)
+			return runRemoteInstall(cmd, reg, src, f)
 		},
 	}
 	cmd.Flags().StringVar(&f.name, "name", "", "Plugin name for a local path (default: file name without mf- prefix)")
@@ -182,7 +182,7 @@ skip (required in non-interactive runs).`,
 	return cmd
 }
 
-func runRemoteInstall(cmd *cobra.Command, src installSource, f installFlags) error {
+func runRemoteInstall(cmd *cobra.Command, reg *registry.Registry, src installSource, f installFlags) error {
 	ctx := cmd.Context()
 	if src.Bare {
 		resolved, err := resolveBareName(ctx, cmd, src, os.Stdin, stdinIsTerminal())
@@ -206,7 +206,7 @@ func runRemoteInstall(cmd *cobra.Command, src installSource, f installFlags) err
 		}
 	}
 
-	m, err := InstallPluginFromRepo(ctx, repoURL, expectedName, RemoteInstallOptions{
+	m, err := InstallPluginFromRepo(ctx, reg, repoURL, expectedName, RemoteInstallOptions{
 		Pin: f.pin, Force: f.force, AllowUnverified: f.allowUnverified, Progress: cmd.ErrOrStderr(),
 	})
 	if err != nil {
@@ -317,7 +317,7 @@ func newPluginListCmd() *cobra.Command {
 	return cmd
 }
 
-func newPluginRemoveCmd() *cobra.Command {
+func newPluginRemoveCmd(reg *registry.Registry) *cobra.Command {
 	var purge bool
 	cmd := &cobra.Command{
 		Use:     "remove <name>",
@@ -325,8 +325,8 @@ func newPluginRemoveCmd() *cobra.Command {
 		Short:   "Remove a plugin from the managed dir",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := removePlugin(args[0], purge); err != nil {
-				return err
+			if err := reg.Remove(args[0], purge); err != nil {
+				return fmt.Errorf("remove plugin: %w", err)
 			}
 			fmt.Fprintf(cmd.ErrOrStderr(), "Removed %q\n", args[0])
 			return nil

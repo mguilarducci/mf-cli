@@ -5,7 +5,6 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -68,19 +67,6 @@ func PrependPluginBinDirToPATH() {
 	_ = os.Setenv("PATH", dir+string(os.PathListSeparator)+path)
 }
 
-// pluginDataDir is the data dir removePlugin purges. Launched plugins get
-// theirs from the registry.
-func pluginDataDir(name string) (string, error) {
-	if err := registry.ValidateName(name); err != nil {
-		return "", err
-	}
-	parent, err := pluginParentDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(parent, "data", name), nil
-}
-
 // pluginNameFromPath derives a plugin name from a binary path:
 // ./bin/mf-digisac -> digisac, and on Windows mf-digisac.exe -> digisac.
 func pluginNameFromPath(path string) string {
@@ -121,112 +107,7 @@ func windowsExecExts() []string {
 	return exts
 }
 
-// managedBinaryName is the file name a plugin gets in the managed bin dir.
-// On Windows it keeps the source's extension (.exe, .bat, ...) so
-// exec.LookPath can still find it through PATHEXT.
-func managedBinaryName(name, src string) string {
-	if runtime.GOOS == windowsGOOS {
-		return pluginBinaryPrefix + name + strings.ToLower(filepath.Ext(src))
-	}
-	return pluginBinaryPrefix + name
-}
-
 func isWindows() bool { return runtime.GOOS == windowsGOOS }
-
-// managedEntries returns the bin-dir entries for name that exist: one on
-// Unix, any PATHEXT variant on Windows.
-func managedEntries(name string) ([]string, error) {
-	binDir, err := PluginBinDir()
-	if err != nil {
-		return nil, err
-	}
-	candidates := []string{pluginBinaryPrefix + name}
-	if isWindows() {
-		candidates = nil
-		for _, ext := range windowsExecExts() {
-			candidates = append(candidates, pluginBinaryPrefix+name+ext)
-		}
-	}
-	var out []string
-	for _, c := range candidates {
-		p := filepath.Join(binDir, c)
-		if _, err := os.Lstat(p); err == nil {
-			out = append(out, p)
-		}
-	}
-	return out, nil
-}
-
-// ensureInstallable refuses to replace an installed plugin unless force, and
-// with force clears the old entry and package so nothing stale is left.
-func ensureInstallable(name string, force bool) error {
-	existing, err := managedEntries(name)
-	if err != nil {
-		return err
-	}
-	if len(existing) == 0 {
-		return nil
-	}
-	if !force {
-		return fmt.Errorf("plugin %q already installed at %s; use --force to replace", name, existing[0])
-	}
-	for _, p := range existing {
-		if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("replace existing plugin: %w", err)
-		}
-	}
-	pkgDir, err := PluginPkgDir(name)
-	if err != nil {
-		return err
-	}
-	if err := os.RemoveAll(pkgDir); err != nil {
-		return fmt.Errorf("remove previous plugin package: %w", err)
-	}
-	return nil
-}
-
-// linkIntoBinDir makes target runnable as `mf <name>`. A symlink keeps a dev
-// build live across rebuilds; a copy is the fallback for filesystems (or
-// Windows accounts) that refuse symlinks.
-func linkIntoBinDir(target, name string) (string, error) {
-	binDir, err := PluginBinDir()
-	if err != nil {
-		return "", err
-	}
-	if err := os.MkdirAll(binDir, 0o750); err != nil {
-		return "", fmt.Errorf("create plugin dir: %w", err)
-	}
-	dst := filepath.Join(binDir, managedBinaryName(name, target))
-	if err := os.Remove(dst); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return "", fmt.Errorf("replace existing plugin: %w", err)
-	}
-	if err := os.Symlink(target, dst); err == nil {
-		return dst, nil
-	}
-	return dst, copyExecutable(target, dst)
-}
-
-// installLocalPlugin links src into the managed bin dir as mf-<name>.
-func installLocalPlugin(src, name string, force bool) (string, error) {
-	if err := registry.ValidateName(name); err != nil {
-		return "", err
-	}
-	abs, err := filepath.Abs(src)
-	if err != nil {
-		return "", fmt.Errorf("resolve %s: %w", src, err)
-	}
-	info, err := os.Stat(abs)
-	if err != nil {
-		return "", fmt.Errorf("stat plugin: %w", err)
-	}
-	if !isExecutableFile(abs, info) {
-		return "", fmt.Errorf("%s is not an executable file", src)
-	}
-	if err := ensureInstallable(name, force); err != nil {
-		return "", err
-	}
-	return linkIntoBinDir(abs, name)
-}
 
 func copyExecutable(src, dst string) (err error) {
 	in, err := os.Open(src) //nolint:gosec // src is the path the user asked to install
@@ -245,44 +126,6 @@ func copyExecutable(src, dst string) (err error) {
 	}
 	if err := out.Close(); err != nil {
 		return fmt.Errorf("write plugin copy: %w", err)
-	}
-	return nil
-}
-
-// removePlugin deletes the managed entry and package for name. Data is
-// kept unless purge.
-func removePlugin(name string, purge bool) error {
-	if err := registry.ValidateName(name); err != nil {
-		return err
-	}
-	existing, err := managedEntries(name)
-	if err != nil {
-		return err
-	}
-	if len(existing) == 0 {
-		binDir, _ := PluginBinDir() //nolint:errcheck // managedEntries already resolved it
-		return fmt.Errorf("plugin %q is not installed in %s", name, binDir)
-	}
-	for _, p := range existing {
-		if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("remove plugin: %w", err)
-		}
-	}
-	pkgDir, err := PluginPkgDir(name)
-	if err != nil {
-		return err
-	}
-	if err := os.RemoveAll(pkgDir); err != nil {
-		return fmt.Errorf("remove plugin package: %w", err)
-	}
-	if purge {
-		dataDir, err := pluginDataDir(name)
-		if err != nil {
-			return err
-		}
-		if err := os.RemoveAll(dataDir); err != nil {
-			return fmt.Errorf("remove plugin data: %w", err)
-		}
 	}
 	return nil
 }

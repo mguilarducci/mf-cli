@@ -1,9 +1,7 @@
 package cli
 
 import (
-	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -81,58 +79,6 @@ func TestPluginBinDir(t *testing.T) {
 func writeExecutable(t *testing.T, path string) string {
 	t.Helper()
 	return writeScript(t, path, "exit 0\n", "exit /b 0\r\n")
-}
-
-func TestInstallListRemove(t *testing.T) {
-	pluginDir := t.TempDir()
-	t.Setenv("MF_PLUGIN_DIR", pluginDir)
-	t.Setenv("PATH", "")
-	PrependPluginBinDirToPATH()
-
-	src := writeExecutable(t, filepath.Join(t.TempDir(), "mf-hello"))
-
-	dst, err := installLocalPlugin(src, pluginNameFromPath(src), false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Symlinks need extra privileges on Windows, where install falls back to a copy.
-	if target, err := os.Readlink(dst); runtime.GOOS != windowsGOOS && (err != nil || target != src) {
-		t.Errorf("install should symlink to %q, got %q (%v)", src, target, err)
-	}
-
-	plugins := discoverPlugins()
-	if len(plugins) != 1 || plugins[0].Name != "hello" || !plugins[0].Managed {
-		t.Fatalf("discoverPlugins() = %+v", plugins)
-	}
-
-	// Reinstalling needs --force.
-	if _, err := installLocalPlugin(src, "hello", false); err == nil {
-		t.Fatal("reinstall without force: want error")
-	}
-	if _, err := installLocalPlugin(src, "hello", true); err != nil {
-		t.Fatalf("reinstall: %v", err)
-	}
-
-	if err := removePlugin("hello", false); err != nil {
-		t.Fatal(err)
-	}
-	if got := discoverPlugins(); len(got) != 0 {
-		t.Errorf("after remove, discoverPlugins() = %+v", got)
-	}
-	if err := removePlugin("hello", false); err == nil {
-		t.Error("removing a missing plugin: want error")
-	}
-}
-
-func TestInstallRejectsNonExecutable(t *testing.T) {
-	t.Setenv("MF_PLUGIN_DIR", t.TempDir())
-	src := filepath.Join(t.TempDir(), "mf-data")
-	if err := os.WriteFile(src, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := installLocalPlugin(src, "data", false); err == nil {
-		t.Error("want error for non-executable file")
-	}
 }
 
 func TestResolvePlugin(t *testing.T) {
