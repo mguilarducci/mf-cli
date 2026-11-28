@@ -123,8 +123,8 @@ func (r *Registry) InstallLocal(src, name string, force bool) (string, error) {
 		entries = append(entries, canonical(p))
 	}
 	pkgCanon := canonical(pkgDir)
-	if real, err := filepath.EvalSymlinks(pkgDir); err == nil {
-		pkgCanon = real
+	if resolved, err := filepath.EvalSymlinks(pkgDir); err == nil {
+		pkgCanon = resolved
 	}
 	for _, hop := range chain {
 		for _, p := range entries {
@@ -247,14 +247,14 @@ func symlinkChain(abs string) ([]string, error) {
 		chain = append(chain, p)
 		info, err := os.Lstat(p)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("inspect %s: %w", p, err)
 		}
 		if info.Mode()&os.ModeSymlink == 0 {
 			return chain, nil
 		}
 		target, err := os.Readlink(p)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("read link %s: %w", p, err)
 		}
 		if !filepath.IsAbs(target) {
 			target = filepath.Join(filepath.Dir(p), target)
