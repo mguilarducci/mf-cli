@@ -19,9 +19,11 @@ import (
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
+
+	"github.com/mguilarducci/mf-cli/cmd/mf/internal/registry"
 )
 
-func newPluginGroupCmd() *cobra.Command {
+func newPluginGroupCmd(reg *registry.Registry) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "plugin",
 		Aliases: []string{"plugins"},
@@ -30,7 +32,7 @@ func newPluginGroupCmd() *cobra.Command {
 with 'mf plugin install', and run it as 'mf <name>'.`,
 		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
-	cmd.AddCommand(newPluginInstallCmd(), newPluginListCmd(), newPluginRemoveCmd())
+	cmd.AddCommand(newPluginInstallCmd(reg), newPluginListCmd(reg), newPluginRemoveCmd(reg))
 	return cmd
 }
 
@@ -88,15 +90,15 @@ func parseInstallSource(arg string) (installSource, error) {
 			return installSource{}, fmt.Errorf("%q is both a local file and an owner/name; use ./%s for the file or the full repository URL", arg, arg)
 		}
 		m := ownerNameRe.FindStringSubmatch(arg)
-		name := strings.TrimPrefix(m[2], pluginBinaryPrefix)
-		if err := validatePluginName(name); err != nil {
+		name := strings.TrimPrefix(m[2], registry.BinaryPrefix)
+		if err := registry.ValidateName(name); err != nil {
 			return installSource{}, err
 		}
 		return installSource{Kind: installFromRepo, Ref: conventionRepoURL(m[1], name), Name: name}, nil
 	case strings.ContainsAny(arg, `/\`):
 		return installSource{}, fmt.Errorf("%q is neither owner/name nor an explicit path; local paths start with ./, ../ or /", arg)
 	default:
-		if err := validatePluginName(arg); err != nil {
+		if err := registry.ValidateName(arg); err != nil {
 			return installSource{}, err
 		}
 		return installSource{Kind: installFromRepo, Ref: conventionRepoURL(defaultPluginOwner, arg), Name: arg, Bare: true}, nil
@@ -104,7 +106,7 @@ func parseInstallSource(arg string) (installSource, error) {
 }
 
 func conventionRepoURL(owner, name string) string {
-	return pluginForgeURL + "/" + owner + "/" + pluginBinaryPrefix + name
+	return pluginForgeURL + "/" + owner + "/" + registry.BinaryPrefix + name
 }
 
 // trustedRepo reports whether repoURL belongs to the default owner, whose
@@ -122,7 +124,7 @@ type installFlags struct {
 	force, yes, allowUnverified bool
 }
 
-func newPluginInstallCmd() *cobra.Command {
+func newPluginInstallCmd(reg *registry.Registry) *cobra.Command {
 	var f installFlags
 	cmd := &cobra.Command{
 		Use:   "install <name|owner/name|url|path>",
@@ -138,7 +140,7 @@ Source forms:
                   mf plugin install someone/foo  # github.com/someone/mf-foo
   url         Any git repository URL:
                   mf plugin install https://github.com/` + defaultPluginOwner + `/mf-digisac
-  path        A local executable, linked into the managed directory (a
+  path        A local executable, linked into the Plugin registry (a
               symlink, so rebuilds are picked up). Paths start with ./, ../
               or /, so they can't be mistaken for owner/name:
                   mf plugin install ./bin/mf-digisac
@@ -159,16 +161,16 @@ skip (required in non-interactive runs).`,
 			if src.Kind == installFromPath {
 				name := f.name
 				if name == "" {
-					name = pluginNameFromPath(src.Ref)
+					name = reg.NameFromPath(src.Ref)
 				}
-				dst, err := installLocalPlugin(src.Ref, name, f.force)
+				dst, err := reg.InstallLocal(src.Ref, name, f.force)
 				if err != nil {
 					return fmt.Errorf("install plugin: %w", err)
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "Installed plugin %q → %s\n", name, dst)
 				return nil
 			}
-			return runRemoteInstall(cmd, src, f)
+			return runRemoteInstall(cmd, reg, src, f)
 		},
 	}
 	cmd.Flags().StringVar(&f.name, "name", "", "Plugin name for a local path (default: file name without mf- prefix)")
@@ -180,7 +182,7 @@ skip (required in non-interactive runs).`,
 	return cmd
 }
 
-func runRemoteInstall(cmd *cobra.Command, src installSource, f installFlags) error {
+func runRemoteInstall(cmd *cobra.Command, reg *registry.Registry, src installSource, f installFlags) error {
 	ctx := cmd.Context()
 	if src.Bare {
 		resolved, err := resolveBareName(ctx, cmd, src, os.Stdin, stdinIsTerminal())
@@ -204,7 +206,7 @@ func runRemoteInstall(cmd *cobra.Command, src installSource, f installFlags) err
 		}
 	}
 
-	m, err := InstallPluginFromRepo(ctx, repoURL, expectedName, RemoteInstallOptions{
+	m, err := InstallPluginFromRepo(ctx, reg, repoURL, expectedName, RemoteInstallOptions{
 		Pin: f.pin, Force: f.force, AllowUnverified: f.allowUnverified, Progress: cmd.ErrOrStderr(),
 	})
 	if err != nil {
@@ -274,19 +276,19 @@ func confirm(cmd *cobra.Command, prompt string) (bool, error) {
 	return answer == "y" || answer == "yes", nil
 }
 
-func newPluginListCmd() *cobra.Command {
+func newPluginListCmd(reg *registry.Registry) *cobra.Command {
 	var output string
 	cmd := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls"},
-		Short:   "List plugins found on PATH and in the managed dir",
+		Short:   "List plugins on the Search path: the Plugin registry, then PATH",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			plugins := discoverPlugins()
+			plugins := reg.List()
 			if output == "json" {
-				enc := json.NewEncoder(os.Stdout)
+				enc := json.NewEncoder(cmd.OutOrStdout())
 				enc.SetIndent("", "  ")
 				if plugins == nil {
-					plugins = []pluginEntry{}
+					plugins = []registry.Plugin{}
 				}
 				return enc.Encode(plugins)
 			}
@@ -294,7 +296,7 @@ func newPluginListCmd() *cobra.Command {
 				fmt.Fprintln(cmd.ErrOrStderr(), "No plugins found. Install one with: mf plugin install <name|owner/name|url|path>")
 				return nil
 			}
-			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 			fmt.Fprintln(w, "NAME\tVERSION\tSOURCE\tPATH")
 			for _, p := range plugins {
 				source, path, version := "PATH", p.Path, "-"
@@ -315,16 +317,16 @@ func newPluginListCmd() *cobra.Command {
 	return cmd
 }
 
-func newPluginRemoveCmd() *cobra.Command {
+func newPluginRemoveCmd(reg *registry.Registry) *cobra.Command {
 	var purge bool
 	cmd := &cobra.Command{
 		Use:     "remove <name>",
 		Aliases: []string{"rm", "uninstall"},
-		Short:   "Remove a plugin from the managed dir",
+		Short:   "Remove a managed plugin from the Plugin registry",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := removePlugin(args[0], purge); err != nil {
-				return err
+			if err := reg.Remove(args[0], purge); err != nil {
+				return fmt.Errorf("remove plugin: %w", err)
 			}
 			fmt.Fprintf(cmd.ErrOrStderr(), "Removed %q\n", args[0])
 			return nil

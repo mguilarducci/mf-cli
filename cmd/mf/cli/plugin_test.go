@@ -1,49 +1,17 @@
 package cli
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/mguilarducci/mf-cli/cmd/mf/internal/registry"
 )
-
-func TestValidatePluginName(t *testing.T) {
-	cases := []struct {
-		name string
-		ok   bool
-	}{
-		{"digisac", true},
-		{"my-tool", true},
-		{"tool_2", true},
-		{"", false},
-		{"-flag", false},
-		{"--help", false},
-		{"Upper", false},
-		{"a/b", false},
-		{"..", false},
-		{"with space", false},
-	}
-	for _, c := range cases {
-		if err := validatePluginName(c.name); (err == nil) != c.ok {
-			t.Errorf("validatePluginName(%q) err = %v, want ok=%v", c.name, err, c.ok)
-		}
-	}
-}
-
-func TestPluginNameFromPath(t *testing.T) {
-	cases := map[string]string{
-		"./bin/mf-digisac": "digisac",
-		"/x/mf-my-tool":    "my-tool",
-		"plain":            "plain",
-	}
-	for in, want := range cases {
-		if got := pluginNameFromPath(in); got != want {
-			t.Errorf("pluginNameFromPath(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
 
 func TestPluginEnv(t *testing.T) {
 	parent := []string{
@@ -88,97 +56,19 @@ func TestPluginEnvPrefix(t *testing.T) {
 	}
 }
 
-func TestPluginDirs(t *testing.T) {
-	t.Setenv("MF_PLUGIN_DIR", "")
-	xdg := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", xdg)
-	if got, err := PluginBinDir(); err != nil || got != filepath.Join(xdg, "mf", "plugins", "bin") {
-		t.Errorf("PluginBinDir() = %q, %v", got, err)
-	}
-	custom := t.TempDir()
-	t.Setenv("MF_PLUGIN_DIR", custom)
-	if got, err := PluginDataDir("digisac"); err != nil || got != filepath.Join(custom, "data", "digisac") {
-		t.Errorf("PluginDataDir() = %q, %v", got, err)
-	}
-	if _, err := PluginDataDir("../escape"); err == nil {
-		t.Error("PluginDataDir(\"../escape\"): want error")
-	}
-}
-
-// writeExecutable creates a tiny no-op plugin at path (path.bat on Windows)
-// and returns the path it wrote.
 func writeExecutable(t *testing.T, path string) string {
 	t.Helper()
-	body := "#!/bin/sh\nexit 0\n"
-	if runtime.GOOS == windowsGOOS {
-		path += ".bat"
-		body = "@exit /b 0\r\n"
-	}
-	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return path
-}
-
-func TestInstallListRemove(t *testing.T) {
-	pluginDir := t.TempDir()
-	t.Setenv("MF_PLUGIN_DIR", pluginDir)
-	t.Setenv("PATH", "")
-	PrependPluginBinDirToPATH()
-
-	src := writeExecutable(t, filepath.Join(t.TempDir(), "mf-hello"))
-
-	dst, err := installLocalPlugin(src, pluginNameFromPath(src), false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Symlinks need extra privileges on Windows, where install falls back to a copy.
-	if target, err := os.Readlink(dst); runtime.GOOS != windowsGOOS && (err != nil || target != src) {
-		t.Errorf("install should symlink to %q, got %q (%v)", src, target, err)
-	}
-
-	plugins := discoverPlugins()
-	if len(plugins) != 1 || plugins[0].Name != "hello" || !plugins[0].Managed {
-		t.Fatalf("discoverPlugins() = %+v", plugins)
-	}
-
-	// Reinstalling needs --force.
-	if _, err := installLocalPlugin(src, "hello", false); err == nil {
-		t.Fatal("reinstall without force: want error")
-	}
-	if _, err := installLocalPlugin(src, "hello", true); err != nil {
-		t.Fatalf("reinstall: %v", err)
-	}
-
-	if err := removePlugin("hello", false); err != nil {
-		t.Fatal(err)
-	}
-	if got := discoverPlugins(); len(got) != 0 {
-		t.Errorf("after remove, discoverPlugins() = %+v", got)
-	}
-	if err := removePlugin("hello", false); err == nil {
-		t.Error("removing a missing plugin: want error")
-	}
-}
-
-func TestInstallRejectsNonExecutable(t *testing.T) {
-	t.Setenv("MF_PLUGIN_DIR", t.TempDir())
-	src := filepath.Join(t.TempDir(), "mf-data")
-	if err := os.WriteFile(src, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := installLocalPlugin(src, "data", false); err == nil {
-		t.Error("want error for non-executable file")
-	}
+	return writeScript(t, path, "exit 0\n", "exit /b 0\r\n")
 }
 
 func TestResolvePlugin(t *testing.T) {
+	t.Parallel()
 	binDir := t.TempDir()
 	writeExecutable(t, filepath.Join(binDir, "mf-hello"))
 	writeExecutable(t, filepath.Join(binDir, "mf-plugin")) // shadowed by built-in
-	t.Setenv("PATH", binDir)
 
-	root := NewRootCmd()
+	reg := registry.New(registry.Env{Path: []string{binDir}, GOOS: runtime.GOOS})
+	root := NewRootCmd(reg)
 	cases := []struct {
 		args     []string
 		ok       bool
@@ -192,7 +82,7 @@ func TestResolvePlugin(t *testing.T) {
 		{nil, false, nil},
 	}
 	for _, c := range cases {
-		_, args, ok := resolvePlugin(root, c.args)
+		_, args, ok := resolvePlugin(reg, root, c.args)
 		if ok != c.ok || (ok && !slices.Equal(args, c.wantArgs)) {
 			t.Errorf("resolvePlugin(%v) = (%v, %v), want (%v, %v)", c.args, args, ok, c.wantArgs, c.ok)
 		}
@@ -200,8 +90,8 @@ func TestResolvePlugin(t *testing.T) {
 }
 
 func TestFormatPluginHelpSection(t *testing.T) {
-	root := NewRootCmd()
-	got := formatPluginHelpSection(root, []pluginEntry{{Name: "digisac"}, {Name: "plugin"}})
+	root := NewRootCmd(registry.New(registry.Env{}))
+	got := formatPluginHelpSection(root, []registry.Plugin{{Name: "digisac"}, {Name: "plugin"}})
 	if !strings.Contains(got, "digisac") || !strings.Contains(got, "Plugin Commands:") {
 		t.Errorf("help section = %q", got)
 	}
@@ -210,5 +100,66 @@ func TestFormatPluginHelpSection(t *testing.T) {
 	}
 	if formatPluginHelpSection(root, nil) != "" {
 		t.Error("empty plugin list should render nothing")
+	}
+}
+
+// registryWithPlugins builds a registry with a managed "managed" plugin and
+// an unmanaged "onpath" plugin.
+func registryWithPlugins(t *testing.T) *registry.Registry {
+	t.Helper()
+	regDir, pathDir := t.TempDir(), t.TempDir()
+	if err := os.MkdirAll(filepath.Join(regDir, "bin"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	writeExecutable(t, filepath.Join(regDir, "bin", "mf-managed"))
+	writeExecutable(t, filepath.Join(pathDir, "mf-onpath"))
+	return registry.New(registry.Env{PluginDir: regDir, Path: []string{pathDir}, GOOS: runtime.GOOS})
+}
+
+func runRoot(t *testing.T, reg *registry.Registry, args ...string) string {
+	t.Helper()
+	root := NewRootCmd(reg)
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs(args)
+	if err := root.Execute(); err != nil {
+		t.Fatalf("mf %v: %v", args, err)
+	}
+	return out.String()
+}
+
+func TestPluginListRendersRegistryList(t *testing.T) {
+	t.Parallel()
+	reg := registryWithPlugins(t)
+	var got []map[string]any
+	if err := json.Unmarshal([]byte(runRoot(t, reg, "plugin", "list", "-o", "json")), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := reg.List()
+	if len(got) != len(want) {
+		t.Fatalf("list json = %v; want %d plugins", got, len(want))
+	}
+	for i, p := range want {
+		if got[i]["name"] != p.Name || got[i]["path"] != p.Path || got[i]["managed"] != p.Managed {
+			t.Errorf("list json[%d] = %v; want %+v", i, got[i], p)
+		}
+	}
+
+	table := runRoot(t, reg, "plugin", "list")
+	for _, p := range want {
+		if !strings.Contains(table, p.Name) {
+			t.Errorf("list table missing %s:\n%s", p.Name, table)
+		}
+	}
+}
+
+func TestRootHelpRendersRegistryList(t *testing.T) {
+	t.Parallel()
+	help := runRoot(t, registryWithPlugins(t), "--help")
+	for _, want := range []string{"Plugin Commands:", "(plugin: mf-managed)", "(plugin: mf-onpath)"} {
+		if !strings.Contains(help, want) {
+			t.Errorf("help missing %q:\n%s", want, help)
+		}
 	}
 }

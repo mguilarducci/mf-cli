@@ -23,6 +23,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/mguilarducci/mf-cli/cmd/mf/internal/registry"
 )
 
 var (
@@ -131,7 +133,7 @@ func osAliases(goos string) []string {
 // platform, most specific first: mf-<name>_<version>_<os>_<arch> and
 // mf-<name>_<os>_<arch>, as .tar.gz, .zip or a bare binary.
 func assetCandidates(name, tag string) []string {
-	binName := pluginBinaryPrefix + name
+	binName := registry.BinaryPrefix + name
 	version := strings.TrimPrefix(tag, "v")
 	var stems []string
 	for _, osName := range osAliases(runtime.GOOS) {
@@ -160,7 +162,7 @@ func assetCandidates(name, tag string) []string {
 }
 
 func checksumCandidates(name, tag string) []string {
-	binName := pluginBinaryPrefix + name
+	binName := registry.BinaryPrefix + name
 	return []string{
 		checksumsFileName,
 		fmt.Sprintf("%s_%s_checksums.txt", binName, strings.TrimPrefix(tag, "v")),
@@ -309,7 +311,7 @@ func fetchAndVerify(ctx context.Context, rawURL, asset, wantDigest, stagingDir s
 // extractPluginBinary writes the archive's mf-<name> entry to dst, executable.
 // A bare (non-archive) asset is the binary itself.
 func extractPluginBinary(assetPath, name, dst string) error {
-	binName := pluginBinaryPrefix + name
+	binName := registry.BinaryPrefix + name
 	lower := strings.ToLower(assetPath)
 	switch {
 	case strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".tgz"):

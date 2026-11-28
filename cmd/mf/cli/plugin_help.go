@@ -9,30 +9,32 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/mguilarducci/mf-cli/cmd/mf/internal/registry"
 )
 
 // usePluginCommandsInRootHelp appends a "Plugin Commands" section to the
-// root help so installed plugins show up next to the built-ins.
-func usePluginCommandsInRootHelp(root *cobra.Command) {
+// root help so the Plugins on the Search path show up next to the built-ins.
+func usePluginCommandsInRootHelp(root *cobra.Command, reg *registry.Registry) {
 	defaultHelp := root.HelpFunc()
 	root.SetHelpFunc(func(cmd *cobra.Command, args []string) {
 		defaultHelp(cmd, args)
 		if cmd != root {
 			return
 		}
-		if section := formatPluginHelpSection(root, discoverPlugins()); section != "" {
+		if section := formatPluginHelpSection(root, reg.List()); section != "" {
 			fmt.Fprint(cmd.OutOrStdout(), section)
 		}
 	})
 }
 
-func formatPluginHelpSection(root *cobra.Command, plugins []pluginEntry) string {
+func formatPluginHelpSection(root *cobra.Command, plugins []registry.Plugin) string {
 	var b strings.Builder
 	for _, p := range plugins {
 		if shadowsBuiltinCommand(root, p.Name) {
 			continue
 		}
-		fmt.Fprintf(&b, "  %-11s %s\n", p.Name, "(plugin: "+pluginBinaryPrefix+p.Name+")")
+		fmt.Fprintf(&b, "  %-11s %s\n", p.Name, "(plugin: "+registry.BinaryPrefix+p.Name+")")
 	}
 	if b.Len() == 0 {
 		return ""

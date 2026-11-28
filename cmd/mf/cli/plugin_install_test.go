@@ -16,7 +16,10 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
+
+	"github.com/mguilarducci/mf-cli/cmd/mf/internal/registry"
 )
 
 func TestParseInstallSource(t *testing.T) {
@@ -204,21 +207,34 @@ func tarGz(t *testing.T, name string, body []byte) []byte {
 	return buf.Bytes()
 }
 
+// release is a served release and what has been asked of it.
+type release struct {
+	srv       *httptest.Server
+	downloads atomic.Int32 // asset requests served
+	broken    atomic.Bool  // when set, every request fails
+}
+
 // releaseServer serves one release: checksums.txt plus this platform's archive.
-func releaseServer(t *testing.T, name string, binary []byte, corruptChecksum bool) *httptest.Server {
+func releaseServer(t *testing.T, name string, binary []byte, corruptChecksum bool) *release {
 	t.Helper()
 	asset := fmt.Sprintf("mf-%s_%s_%s.tar.gz", name, runtime.GOOS, runtime.GOARCH)
-	archive := tarGz(t, pluginBinaryName(name), binary)
+	archive := tarGz(t, registry.New(registry.Env{GOOS: runtime.GOOS}).ExecutableName(name), binary)
 	sum := sha256.Sum256(archive)
 	digest := hex.EncodeToString(sum[:])
 	if corruptChecksum {
 		digest = strings.Repeat("0", 64)
 	}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	rel := &release{}
+	rel.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if rel.broken.Load() {
+			http.Error(w, "release unavailable", http.StatusInternalServerError)
+			return
+		}
 		switch filepath.Base(r.URL.Path) {
 		case checksumsFileName:
 			fmt.Fprintf(w, "%s  %s\n", digest, asset)
 		case asset:
+			rel.downloads.Add(1)
 			if _, err := w.Write(archive); err != nil {
 				t.Errorf("serve asset: %v", err)
 			}
@@ -226,25 +242,27 @@ func releaseServer(t *testing.T, name string, binary []byte, corruptChecksum boo
 			http.NotFound(w, r)
 		}
 	}))
-	t.Cleanup(srv.Close)
-	return srv
+	t.Cleanup(rel.srv.Close)
+	return rel
 }
 
-func setupRemote(t *testing.T, corrupt bool) (repoURL string) {
+// setupRemote serves a release of hello and returns its repository and a
+// registry, rooted at a temp dir, to install it into.
+func setupRemote(t *testing.T, corrupt bool) (reg *registry.Registry, repoURL string, rel *release) {
 	t.Helper()
 	t.Setenv("MF_PLUGIN_ALLOW_FILE_REMOTES", "1")
-	t.Setenv("MF_PLUGIN_DIR", t.TempDir())
-	srv := releaseServer(t, "hello", []byte("#!/bin/sh\necho hello\n"), corrupt)
-	return gitRepo(t, map[string]string{
-		pluginMetadataFileName: "name: hello\ndescription: Says hello\ndownload_url: " + srv.URL + "/{tag}/{asset}\n",
-	}, "v0.9.0", "v1.0.0", "v1.1.0-rc.1")
+	reg = registry.New(registry.Env{PluginDir: t.TempDir(), GOOS: runtime.GOOS})
+	rel = releaseServer(t, "hello", []byte("#!/bin/sh\necho hello\n"), corrupt)
+	return reg, gitRepo(t, map[string]string{
+		pluginMetadataFileName: "name: hello\ndescription: Says hello\ndownload_url: " + rel.srv.URL + "/{tag}/{asset}\n",
+	}, "v0.9.0", "v1.0.0", "v1.1.0-rc.1"), rel
 }
 
 func TestInstallFromRepoEndToEnd(t *testing.T) {
-	repoURL := setupRemote(t, false)
+	reg, repoURL, _ := setupRemote(t, false)
 	ctx := context.Background()
 
-	m, err := InstallPluginFromRepo(ctx, repoURL, "hello", RemoteInstallOptions{})
+	m, err := InstallPluginFromRepo(ctx, reg, repoURL, "hello", RemoteInstallOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,43 +270,82 @@ func TestInstallFromRepoEndToEnd(t *testing.T) {
 		t.Errorf("manifest = %+v; want newest stable tag v1.0.0, verified", m)
 	}
 
-	PrependPluginBinDirToPATH()
-	plugins := discoverPlugins()
+	plugins := reg.List()
 	if len(plugins) != 1 || plugins[0].Name != "hello" || plugins[0].Manifest == nil || plugins[0].Manifest.Tag != "v1.0.0" {
-		t.Fatalf("discoverPlugins = %+v", plugins)
+		t.Fatalf("registry List() = %+v", plugins)
 	}
 
-	if _, err := InstallPluginFromRepo(ctx, repoURL, "hello", RemoteInstallOptions{}); err == nil {
+	if _, err := InstallPluginFromRepo(ctx, reg, repoURL, "hello", RemoteInstallOptions{}); err == nil {
 		t.Error("reinstall without --force: want error")
 	}
-	m, err = InstallPluginFromRepo(ctx, repoURL, "hello", RemoteInstallOptions{Force: true, Pin: "v0.9.0"})
+	m, err = InstallPluginFromRepo(ctx, reg, repoURL, "hello", RemoteInstallOptions{Force: true, Pin: "v0.9.0"})
 	if err != nil || m.Tag != "v0.9.0" || !m.Pinned {
 		t.Errorf("pinned reinstall = %+v, %v", m, err)
 	}
 
-	if err := removePlugin("hello", false); err != nil {
+	if err := reg.Remove("hello", false); err != nil {
 		t.Fatal(err)
 	}
-	pkg, _ := PluginPkgDir("hello") //nolint:errcheck // name is valid
-	if _, err := os.Stat(pkg); !os.IsNotExist(err) {
-		t.Errorf("remove should delete %s", pkg)
+	if p, ok := reg.Resolve("hello"); ok {
+		t.Errorf("Resolve(hello) after remove = %+v; want none", p)
+	}
+}
+
+func TestInstallFromRepoRefusesExistingBeforeDownload(t *testing.T) {
+	reg, repoURL, rel := setupRemote(t, false)
+	ctx := context.Background()
+	if _, err := InstallPluginFromRepo(ctx, reg, repoURL, "hello", RemoteInstallOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	before := rel.downloads.Load()
+
+	if _, err := InstallPluginFromRepo(ctx, reg, repoURL, "hello", RemoteInstallOptions{}); err == nil ||
+		!strings.Contains(err.Error(), "already installed") {
+		t.Fatalf("reinstall without --force = %v; want refusal", err)
+	}
+	if got := rel.downloads.Load(); got != before {
+		t.Errorf("refused reinstall downloaded the asset %d time(s); want none", got-before)
+	}
+}
+
+func TestInstallFromRepoFailedForcedReinstallKeepsPlugin(t *testing.T) {
+	reg, repoURL, rel := setupRemote(t, false)
+	ctx := context.Background()
+	if _, err := InstallPluginFromRepo(ctx, reg, repoURL, "hello", RemoteInstallOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	rel.broken.Store(true)
+
+	if _, err := InstallPluginFromRepo(ctx, reg, repoURL, "hello", RemoteInstallOptions{Force: true, Pin: "v0.9.0"}); err == nil {
+		t.Fatal("forced reinstall with a failing download: want error")
+	}
+	p, ok := reg.Resolve("hello")
+	if !ok || !p.Managed || p.Manifest == nil || p.Manifest.Tag != "v1.0.0" {
+		t.Fatalf("Resolve(hello) after failed reinstall = %+v, %v; want hello v1.0.0 kept", p, ok)
+	}
+	if runtime.GOOS == windowsGOOS {
+		return // the served binary is a shell script
+	}
+	out, err := exec.CommandContext(ctx, p.Path).Output()
+	if err != nil || string(out) != "hello\n" {
+		t.Errorf("running the kept plugin = %q, %v; want hello", out, err)
 	}
 }
 
 func TestInstallRejectsChecksumMismatch(t *testing.T) {
-	repoURL := setupRemote(t, true)
-	_, err := InstallPluginFromRepo(context.Background(), repoURL, "", RemoteInstallOptions{})
+	reg, repoURL, _ := setupRemote(t, true)
+	_, err := InstallPluginFromRepo(context.Background(), reg, repoURL, "", RemoteInstallOptions{})
 	if err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
 		t.Fatalf("want checksum mismatch, got %v", err)
 	}
-	if got, _ := managedEntries("hello"); len(got) != 0 { //nolint:errcheck // dir resolution can't fail here
-		t.Errorf("nothing should be installed after a failed verify: %v", got)
+	if err := reg.CanInstall("hello", false); err != nil {
+		t.Errorf("nothing should be installed after a failed verify: %v", err)
 	}
 }
 
 func TestInstallRefusesUnexpectedName(t *testing.T) {
-	repoURL := setupRemote(t, false)
-	if _, err := InstallPluginFromRepo(context.Background(), repoURL, "other", RemoteInstallOptions{}); err == nil {
+	reg, repoURL, _ := setupRemote(t, false)
+	if _, err := InstallPluginFromRepo(context.Background(), reg, repoURL, "other", RemoteInstallOptions{}); err == nil {
 		t.Fatal("requested name differs from the declared name: want error")
 	}
 }
@@ -307,7 +364,7 @@ func TestResolveBareName(t *testing.T) {
 		return src
 	}
 	run := func(name, input string, interactive bool) (installSource, error) {
-		cmd := newPluginInstallCmd()
+		cmd := newPluginInstallCmd(registry.New(registry.Env{}))
 		cmd.SetErr(&bytes.Buffer{})
 		return resolveBareName(context.Background(), cmd, bare(name), strings.NewReader(input), interactive)
 	}

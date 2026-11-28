@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/mguilarducci/mf-cli/cmd/mf/internal/registry"
 )
 
 // maxTagFallbacks bounds how many older tags are tried when the newest has no
@@ -28,7 +30,7 @@ type RemoteInstallOptions struct {
 
 // InstallPluginFromRepo installs the newest stable release of repoURL (or
 // opts.Pin). expectedName, when set, must match the plugin's declared name.
-func InstallPluginFromRepo(ctx context.Context, repoURL, expectedName string, opts RemoteInstallOptions) (*PluginManifest, error) {
+func InstallPluginFromRepo(ctx context.Context, reg *registry.Registry, repoURL, expectedName string, opts RemoteInstallOptions) (*registry.Manifest, error) {
 	repoURL = strings.TrimRight(repoURL, "/")
 	tags := []string{opts.Pin}
 	if opts.Pin == "" {
@@ -47,7 +49,7 @@ func InstallPluginFromRepo(ctx context.Context, repoURL, expectedName string, op
 	}
 	var lastErr error
 	for _, tag := range tags {
-		m, err := installRepoAtTag(ctx, repoURL, expectedName, tag, opts)
+		m, err := installRepoAtTag(ctx, reg, repoURL, expectedName, tag, opts)
 		if err == nil {
 			return m, nil
 		}
@@ -59,7 +61,7 @@ func InstallPluginFromRepo(ctx context.Context, repoURL, expectedName string, op
 	return nil, lastErr
 }
 
-func installRepoAtTag(ctx context.Context, repoURL, expectedName, tag string, opts RemoteInstallOptions) (*PluginManifest, error) {
+func installRepoAtTag(ctx context.Context, reg *registry.Registry, repoURL, expectedName, tag string, opts RemoteInstallOptions) (*registry.Manifest, error) {
 	step(opts.Progress, "Reading %s at %s", pluginMetadataFileName, tag)
 	meta, err := fetchPluginMetadataAtTag(ctx, repoURL, tag)
 	if err != nil {
@@ -69,8 +71,8 @@ func installRepoAtTag(ctx context.Context, repoURL, expectedName, tag string, op
 	if err != nil {
 		return nil, err
 	}
-	if err := ensureInstallable(name, opts.Force); err != nil {
-		return nil, err
+	if err := reg.CanInstall(name, opts.Force); err != nil {
+		return nil, fmt.Errorf("check plugin %q: %w", name, err)
 	}
 
 	staging, err := os.MkdirTemp("", "mf-plugin-fetch-")
@@ -79,17 +81,17 @@ func installRepoAtTag(ctx context.Context, repoURL, expectedName, tag string, op
 	}
 	defer func() { _ = os.RemoveAll(staging) }()
 
-	step(opts.Progress, "Downloading %s%s %s", pluginBinaryPrefix, name, tag)
+	step(opts.Progress, "Downloading %s%s %s", registry.BinaryPrefix, name, tag)
 	asset, err := downloadPluginAsset(ctx, meta, repoURL, name, tag, staging, opts.AllowUnverified)
 	if err != nil {
 		return nil, err
 	}
-	staged := filepath.Join(staging, "extracted-"+pluginBinaryName(name))
+	staged := filepath.Join(staging, "extracted-"+reg.ExecutableName(name))
 	if err := extractPluginBinary(asset.Path, name, staged); err != nil {
 		return nil, err
 	}
 
-	manifest := &PluginManifest{
+	manifest := &registry.Manifest{
 		Name:        name,
 		RepoURL:     repoURL,
 		Tag:         tag,
@@ -102,8 +104,8 @@ func installRepoAtTag(ctx context.Context, repoURL, expectedName, tag string, op
 	if meta != nil {
 		manifest.Description = meta.Description
 	}
-	if err := placeStagedBinary(staged, manifest); err != nil {
-		return nil, err
+	if _, err := reg.InstallStaged(staged, manifest, opts.Force); err != nil {
+		return nil, fmt.Errorf("install plugin %q: %w", name, err)
 	}
 	return manifest, nil
 }
@@ -124,41 +126,6 @@ func remotePluginName(meta *PluginMetadata, repoURL, expectedName string) (strin
 			redactURL(repoURL), name, expectedName)
 	}
 	return name, nil
-}
-
-// placeStagedBinary moves the binary into pkg/<name>/, writes the manifest,
-// and points bin/mf-<name> at it.
-func placeStagedBinary(staged string, m *PluginManifest) error {
-	pkgDir, err := PluginPkgDir(m.Name)
-	if err != nil {
-		return err
-	}
-	if err := os.RemoveAll(pkgDir); err != nil {
-		return fmt.Errorf("clear previous install: %w", err)
-	}
-	if err := os.MkdirAll(pkgDir, 0o750); err != nil {
-		return fmt.Errorf("create plugin pkg dir: %w", err)
-	}
-	pkgBin := filepath.Join(pkgDir, pluginBinaryName(m.Name))
-	if err := os.Rename(staged, pkgBin); err != nil {
-		// Staging may be on another filesystem (TMPDIR); fall back to a copy.
-		if err := copyExecutable(staged, pkgBin); err != nil {
-			return err
-		}
-	}
-	if err := SavePluginManifest(m); err != nil {
-		return err
-	}
-	_, err = linkIntoBinDir(pkgBin, m.Name)
-	return err
-}
-
-// pluginBinaryName is the on-disk executable name for a plugin.
-func pluginBinaryName(name string) string {
-	if isWindows() {
-		return pluginBinaryPrefix + name + ".exe"
-	}
-	return pluginBinaryPrefix + name
 }
 
 func step(w io.Writer, format string, args ...any) {
