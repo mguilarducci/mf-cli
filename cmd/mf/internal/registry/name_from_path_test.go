@@ -6,6 +6,16 @@ import (
 	"github.com/mguilarducci/mf-cli/cmd/mf/internal/registry"
 )
 
+func TestExecutableName(t *testing.T) {
+	t.Parallel()
+	if got := registry.New(registry.Env{GOOS: "linux"}).ExecutableName("hello"); got != "mf-hello" {
+		t.Errorf("ExecutableName on Unix = %q; want mf-hello", got)
+	}
+	if got := registry.New(registry.Env{GOOS: "windows"}).ExecutableName("hello"); got != "mf-hello.exe" {
+		t.Errorf("ExecutableName on Windows = %q; want mf-hello.exe", got)
+	}
+}
+
 func TestNameFromPath(t *testing.T) {
 	t.Parallel()
 	unix := registry.New(registry.Env{GOOS: "linux"})

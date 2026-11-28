@@ -122,19 +122,8 @@ func (r *Registry) InstallLocal(src, name string, force bool) (string, error) {
 			return "", fmt.Errorf("%s is inside the package being replaced for %q; install from the original file instead", src, name)
 		}
 	}
-	if err := os.MkdirAll(binDir, 0o750); err != nil {
-		return "", fmt.Errorf("create plugin dir: %w", err)
-	}
-	if err := placeEntry(abs, binDir, dst); err != nil {
+	if err := replaceEntry(abs, binDir, dst, existing); err != nil {
 		return "", err
-	}
-	for _, p := range existing {
-		if p == dst {
-			continue
-		}
-		if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("remove replaced plugin entry: %w", err)
-		}
 	}
 	if len(existing) > 0 {
 		if err := os.RemoveAll(pkgDir); err != nil {
@@ -142,6 +131,26 @@ func (r *Registry) InstallLocal(src, name string, force bool) (string, error) {
 		}
 	}
 	return dst, nil
+}
+
+// replaceEntry makes dst the entry for target, then removes the replaced
+// entries (other Windows extension variants) that are not dst.
+func replaceEntry(target, binDir, dst string, replaced []string) error {
+	if err := os.MkdirAll(binDir, 0o750); err != nil {
+		return fmt.Errorf("create plugin dir: %w", err)
+	}
+	if err := placeEntry(target, binDir, dst); err != nil {
+		return err
+	}
+	for _, p := range replaced {
+		if p == dst {
+			continue
+		}
+		if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove replaced plugin entry: %w", err)
+		}
+	}
+	return nil
 }
 
 // placeEntry links (or copies) target to a temporary name in binDir, then
@@ -187,6 +196,12 @@ func copyExecutable(src, dst string) (err error) {
 		return fmt.Errorf("write plugin copy: %w", err)
 	}
 	return nil
+}
+
+// ExecutableName is the file name a repository download of name is staged
+// and installed under: mf-<name>, with .exe on Windows.
+func (r *Registry) ExecutableName(name string) string {
+	return r.entryName(name, ".exe")
 }
 
 // entryName is the file name a plugin gets in the bin dir. On Windows it

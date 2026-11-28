@@ -86,7 +86,7 @@ func installRepoAtTag(ctx context.Context, reg *registry.Registry, repoURL, expe
 	if err != nil {
 		return nil, err
 	}
-	staged := filepath.Join(staging, "extracted-"+pluginBinaryName(name))
+	staged := filepath.Join(staging, "extracted-"+reg.ExecutableName(name))
 	if err := extractPluginBinary(asset.Path, name, staged); err != nil {
 		return nil, err
 	}
@@ -126,14 +126,6 @@ func remotePluginName(meta *PluginMetadata, repoURL, expectedName string) (strin
 			redactURL(repoURL), name, expectedName)
 	}
 	return name, nil
-}
-
-// pluginBinaryName is the on-disk executable name for a plugin.
-func pluginBinaryName(name string) string {
-	if isWindows() {
-		return registry.BinaryPrefix + name + ".exe"
-	}
-	return registry.BinaryPrefix + name
 }
 
 func step(w io.Writer, format string, args ...any) {

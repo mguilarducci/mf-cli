@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -163,6 +164,49 @@ func TestInstallStagedFailureWithForceKeepsOldPlugin(t *testing.T) {
 	}
 	assertBinDir(t, dir, "mf-hello"+hostExt())
 	assertPkgDir(t, dir, "hello")
+}
+
+// A forced reinstall replaces the package's files in place, so the old entry
+// never points at a missing binary: a failure clearing out the previous
+// package still leaves hello runnable.
+func TestInstallStagedForceKeepsEntryRunnableWhenCleanupFails(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs Unix permissions that bind the current user")
+	}
+	r, dir := hostRegistry(t)
+	dst, err := r.InstallStaged(stage(t), manifest("v1.0.0"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An undeletable leftover in the previous package.
+	locked := filepath.Join(dir, "pkg", "hello", "locked")
+	if err := os.MkdirAll(filepath.Join(locked, "sub"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chmod(locked, 0o750); err != nil { // so TempDir cleanup can remove it
+			t.Error(err)
+		}
+	})
+	staged := stage(t)
+	content, err := os.ReadFile(staged)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := r.InstallStaged(staged, manifest("v2.0.0"), true); err == nil {
+		t.Error("InstallStaged with an undeletable leftover = nil error; want the cleanup failure reported")
+	}
+	if got, err := os.ReadFile(dst); err != nil || string(got) != string(content) {
+		t.Errorf("entry %s = %q, %v; want it to run the new binary", dst, got, err)
+	}
+	if m, err := installedManifest(r); err != nil || m == nil || m.Tag != "v2.0.0" {
+		t.Errorf("Manifest(hello) = %+v, %v; want v2.0.0", m, err)
+	}
 }
 
 func TestInstallStagedRejectsBadManifest(t *testing.T) {

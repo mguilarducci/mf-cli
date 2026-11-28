@@ -218,7 +218,7 @@ type release struct {
 func releaseServer(t *testing.T, name string, binary []byte, corruptChecksum bool) *release {
 	t.Helper()
 	asset := fmt.Sprintf("mf-%s_%s_%s.tar.gz", name, runtime.GOOS, runtime.GOARCH)
-	archive := tarGz(t, pluginBinaryName(name), binary)
+	archive := tarGz(t, registry.New(registry.Env{GOOS: runtime.GOOS}).ExecutableName(name), binary)
 	sum := sha256.Sum256(archive)
 	digest := hex.EncodeToString(sum[:])
 	if corruptChecksum {
@@ -247,13 +247,11 @@ func releaseServer(t *testing.T, name string, binary []byte, corruptChecksum boo
 }
 
 // setupRemote serves a release of hello and returns its repository and a
-// registry to install it into. Manifests still resolve through MF_PLUGIN_DIR,
-// so the registry is built from the same environment.
+// registry, rooted at a temp dir, to install it into.
 func setupRemote(t *testing.T, corrupt bool) (reg *registry.Registry, repoURL string, rel *release) {
 	t.Helper()
 	t.Setenv("MF_PLUGIN_ALLOW_FILE_REMOTES", "1")
-	t.Setenv("MF_PLUGIN_DIR", t.TempDir())
-	reg = registry.New(registry.EnvFromProcess())
+	reg = registry.New(registry.Env{PluginDir: t.TempDir(), GOOS: runtime.GOOS})
 	rel = releaseServer(t, "hello", []byte("#!/bin/sh\necho hello\n"), corrupt)
 	return reg, gitRepo(t, map[string]string{
 		pluginMetadataFileName: "name: hello\ndescription: Says hello\ndownload_url: " + rel.srv.URL + "/{tag}/{asset}\n",
@@ -272,7 +270,7 @@ func TestInstallFromRepoEndToEnd(t *testing.T) {
 		t.Errorf("manifest = %+v; want newest stable tag v1.0.0, verified", m)
 	}
 
-	plugins := registry.New(registry.EnvFromProcess()).List()
+	plugins := reg.List()
 	if len(plugins) != 1 || plugins[0].Name != "hello" || plugins[0].Manifest == nil || plugins[0].Manifest.Tag != "v1.0.0" {
 		t.Fatalf("registry List() = %+v", plugins)
 	}

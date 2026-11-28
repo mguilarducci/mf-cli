@@ -1,3 +1,7 @@
+// Portions adapted from entireio/cli (https://github.com/entireio/cli),
+// Copyright (c) 2026 Entire Inc., MIT License.
+// See third_party/licenses/entireio-cli.LICENSE.
+
 package registry
 
 import (
@@ -5,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 )
 
 // InstallStaged installs a repository download: the executable at staged
@@ -13,8 +18,11 @@ import (
 //
 // Everything new is first built in a temporary package directory, so a
 // refusal or a failure there leaves the previous Managed plugin untouched.
-// Only then are the previous package and entries removed, the package moved
-// into place, and the entry swapped in atomically, as InstallLocal does.
+// Then each step keeps the plugin runnable: the package moves into place (an
+// existing one has its binary and manifest replaced in place, each by an
+// atomic rename, so an entry pointing into it never dangles), the entry is
+// swapped in atomically as InstallLocal does, and only then is what the
+// previous package held besides the new files removed.
 func (r *Registry) InstallStaged(staged string, m *Manifest, force bool) (string, error) {
 	if m == nil {
 		return "", errors.New("install staged plugin: no manifest")
@@ -58,29 +66,61 @@ func (r *Registry) InstallStaged(staged string, m *Manifest, force bool) (string
 		return "", err
 	}
 	pkgDir := filepath.Join(pkgRoot, name)
-	if err := os.RemoveAll(pkgDir); err != nil {
-		return "", fmt.Errorf("remove previous plugin package: %w", err)
-	}
-	if err := os.Rename(tmpPkg, pkgDir); err != nil {
-		return "", fmt.Errorf("place plugin package: %w", err)
-	}
-	binDir := filepath.Join(dir, "bin")
-	if err := os.MkdirAll(binDir, 0o750); err != nil {
-		return "", fmt.Errorf("create plugin dir: %w", err)
-	}
-	dst := filepath.Join(binDir, binName)
-	if err := placeEntry(filepath.Join(pkgDir, binName), binDir, dst); err != nil {
+	if err := placePackage(tmpPkg, pkgDir, binName); err != nil {
 		return "", err
 	}
-	for _, p := range existing {
-		if p == dst {
-			continue
-		}
-		if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("remove replaced plugin entry: %w", err)
-		}
+	binDir := filepath.Join(dir, "bin")
+	dst := filepath.Join(binDir, binName)
+	if err := replaceEntry(filepath.Join(pkgDir, binName), binDir, dst, existing); err != nil {
+		return "", err
+	}
+	if err := removeAllExcept(pkgDir, binName, manifestFileName); err != nil {
+		return "", fmt.Errorf("remove previous plugin package: %w", err)
 	}
 	return dst, nil
+}
+
+// placePackage moves the package built in tmpPkg to pkgDir. When pkgDir
+// already exists, its binary and manifest are replaced in place instead, so
+// the path an existing entry points at always holds a runnable binary.
+func placePackage(tmpPkg, pkgDir, binName string) error {
+	info, err := os.Lstat(pkgDir)
+	if errors.Is(err, os.ErrNotExist) {
+		if err := os.Rename(tmpPkg, pkgDir); err != nil {
+			return fmt.Errorf("place plugin package: %w", err)
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect plugin package: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("place plugin package: %s is not a directory", pkgDir)
+	}
+	for _, f := range []string{binName, manifestFileName} {
+		if err := os.Rename(filepath.Join(tmpPkg, f), filepath.Join(pkgDir, f)); err != nil {
+			return fmt.Errorf("place plugin package: %w", err)
+		}
+	}
+	return nil
+}
+
+// removeAllExcept removes everything in dir except the named entries.
+func removeAllExcept(dir string, keep ...string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", dir, err)
+	}
+	var firstErr error
+	for _, e := range entries {
+		if slices.Contains(keep, e.Name()) {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(dir, e.Name())); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 // moveExecutable moves src to dst, copying when they are on different
