@@ -15,3 +15,6 @@ Their full license texts are in third_party/licenses/.
     .github/workflows/, .github/dependabot.yml (build, lint, CI and release)
   - scripts/install.sh (also adapted from entireio/entire-brain,
     Copyright (c) 2026 Entire Inc., MIT License)
+  - the cross-build job and concurrency settings in .github/workflows/
+    (adapted from entireio/entire-brain via mf-digisac, Copyright (c) 2026
+    Entire Inc., MIT License)

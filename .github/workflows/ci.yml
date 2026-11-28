@@ -7,6 +7,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: test-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -37,6 +41,26 @@ jobs:
       - name: Windows unit tests
         run: go test ./... -count=1
 
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        goos: [darwin, linux, windows]
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: go build ./...
+
   # Single required status check: branch protection points at this job, so
   # adding or renaming a job above never needs a settings change.
   test:
@@ -45,9 +69,11 @@ jobs:
     needs:
       - test-core
       - test-windows
+      - build
     if: ${{ always() }}
     steps:
       - name: Check dependencies
         run: |
           [ "${{ needs.test-core.result }}" = "success" ]
           [ "${{ needs.test-windows.result }}" = "success" ]
+          [ "${{ needs.build.result }}" = "success" ]
