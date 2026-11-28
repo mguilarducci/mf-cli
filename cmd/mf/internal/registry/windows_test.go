@@ -3,6 +3,7 @@ package registry_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mguilarducci/mf-cli/cmd/mf/internal/registry"
@@ -38,6 +39,22 @@ func TestWindowsInstallKeepsExtension(t *testing.T) {
 	}
 	if _, err := r.InstallLocal(writePlain(t, filepath.Join(t.TempDir(), "mf-hello")), "noext", false); err == nil {
 		t.Error("InstallLocal(no extension) on Windows = nil error; want rejection")
+	}
+}
+
+// Windows paths compare case-insensitively by the snapshot's rules, whatever
+// the host: a source that differs from the entry only in case is the entry.
+func TestWindowsRefusesEntryDifferingInCase(t *testing.T) {
+	t.Parallel()
+	r, dir := windowsRegistry(t, "")
+	bin := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(bin, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	src := writePlain(t, filepath.Join(bin, "MF-HELLO.BAT"))
+
+	if _, err := r.InstallLocal(src, "hello", true); err == nil || !strings.Contains(err.Error(), "already the registry entry") {
+		t.Errorf("InstallLocal(entry path in other case) err = %v; want refusal as the registry entry", err)
 	}
 }
 

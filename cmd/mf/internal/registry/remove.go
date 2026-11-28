@@ -21,19 +21,23 @@ func (r *Registry) Remove(name string, purge bool) error {
 	if err != nil {
 		return err
 	}
+	dir, err := r.Dir()
+	if err != nil {
+		return err
+	}
 	if len(existing) == 0 {
-		return fmt.Errorf("plugin %q is not installed in %s: %w", name, r.dir, ErrNotManaged)
+		return fmt.Errorf("plugin %q is not installed in %s: %w", name, dir, ErrNotManaged)
 	}
 	for _, p := range existing {
 		if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("remove plugin: %w", err)
 		}
 	}
-	if err := os.RemoveAll(filepath.Join(r.dir, "pkg", name)); err != nil {
+	if err := os.RemoveAll(filepath.Join(dir, "pkg", name)); err != nil {
 		return fmt.Errorf("remove plugin package: %w", err)
 	}
 	if purge {
-		if err := os.RemoveAll(filepath.Join(r.dir, "data", name)); err != nil {
+		if err := os.RemoveAll(filepath.Join(dir, "data", name)); err != nil {
 			return fmt.Errorf("remove plugin data: %w", err)
 		}
 	}

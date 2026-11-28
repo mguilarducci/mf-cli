@@ -112,7 +112,7 @@ func (r *Registry) InstallLocal(src, name string, force bool) (string, error) {
 	dst := filepath.Join(binDir, r.entryName(name, abs))
 	pkgDir := filepath.Join(dir, "pkg", name)
 	for _, p := range append(existing, dst) {
-		if samePath(abs, p) {
+		if r.samePath(abs, p) {
 			return "", fmt.Errorf("%s is already the registry entry for %q; install from the original file instead", src, name)
 		}
 	}
@@ -210,9 +210,9 @@ func (r *Registry) isExecutable(path string, info os.FileInfo) bool {
 
 // samePath reports whether a and b name the same file path once cleaned.
 // Windows paths compare case-insensitively.
-func samePath(a, b string) bool {
+func (r *Registry) samePath(a, b string) bool {
 	a, b = filepath.Clean(a), filepath.Clean(b)
-	return a == b || strings.EqualFold(a, b) && filepath.Separator == '\\'
+	return a == b || r.isWindows() && strings.EqualFold(a, b)
 }
 
 // isWithin reports whether path is inside dir.
