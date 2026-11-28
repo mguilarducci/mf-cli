@@ -252,3 +252,67 @@ func TestInstallForceWithRelativeDirRefusesSourceInsidePackage(t *testing.T) {
 	}
 	assertEntryPointsAt(t, dst, pkgBin)
 }
+
+func TestInstallForceRefusesSymlinkIntoReplacedPackage(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need extra privileges on Windows")
+	}
+	r, dir := hostRegistry(t)
+	pkg := filepath.Join(dir, "pkg", "hello")
+	if err := os.MkdirAll(pkg, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	pkgBin := writeExecutable(t, filepath.Join(pkg, "mf-hello"))
+	dst, err := r.InstallLocal(pkgBin, "hello", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "mf-hello")
+	if err := os.Symlink(pkgBin, link); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := r.InstallLocal(link, "hello", true); err == nil {
+		t.Fatal("forced install through a symlink into the package it replaces: want error")
+	}
+	assertEntryPointsAt(t, dst, pkgBin)
+}
+
+func TestInstallRefusesSymlinkToItsOwnEntry(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need extra privileges on Windows")
+	}
+	r, dir := hostRegistry(t)
+	src := writeExecutable(t, filepath.Join(t.TempDir(), "mf-hello"))
+	if _, err := r.InstallLocal(src, "hello", false); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(dir, "bin", "mf-hello")
+	link := filepath.Join(t.TempDir(), "mf-hello")
+	if err := os.Symlink(dst, link); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := r.InstallLocal(link, "hello", true); err == nil {
+		t.Fatal("forced install through a symlink to its own registry entry: want error")
+	}
+	assertEntryPointsAt(t, dst, src)
+}
+
+// Reinstalling the same dev build with force is the dev loop, not an install
+// onto itself.
+func TestInstallForceReinstallsSameSource(t *testing.T) {
+	t.Parallel()
+	r, _ := hostRegistry(t)
+	src := writeExecutable(t, filepath.Join(t.TempDir(), "mf-hello"+hostExt()))
+	if _, err := r.InstallLocal(src, "hello", false); err != nil {
+		t.Fatal(err)
+	}
+	dst, err := r.InstallLocal(src, "hello", true)
+	if err != nil {
+		t.Fatalf("forced reinstall of the same source: %v", err)
+	}
+	assertEntryPointsAt(t, dst, src)
+}

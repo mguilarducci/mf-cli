@@ -111,13 +111,30 @@ func (r *Registry) InstallLocal(src, name string, force bool) (string, error) {
 	binDir := filepath.Join(dir, "bin")
 	dst := filepath.Join(binDir, r.entryName(name, abs))
 	pkgDir := filepath.Join(dir, "pkg", name)
-	for _, p := range append(existing, dst) {
-		if r.samePath(abs, p) {
-			return "", fmt.Errorf("%s is already the registry entry for %q; install from the original file instead", src, name)
-		}
+	// Check every hop of the source's symlink chain, so a link from outside
+	// the registry can't smuggle in the entry or the package being replaced.
+	// The entry still links to src as given, so it follows rebuilds.
+	chain, err := symlinkChain(abs)
+	if err != nil {
+		return "", fmt.Errorf("resolve %s: %w", src, err)
 	}
-	if len(existing) > 0 && isWithin(abs, pkgDir) {
-		return "", fmt.Errorf("%s is inside the package being replaced for %q; install from the original file instead", src, name)
+	var entries []string
+	for _, p := range append(slices.Clip(existing), dst) {
+		entries = append(entries, canonical(p))
+	}
+	pkgCanon := canonical(pkgDir)
+	if real, err := filepath.EvalSymlinks(pkgDir); err == nil {
+		pkgCanon = real
+	}
+	for _, hop := range chain {
+		for _, p := range entries {
+			if r.samePath(hop, p) {
+				return "", fmt.Errorf("%s is already the registry entry for %q; install from the original file instead", src, name)
+			}
+		}
+		if len(existing) > 0 && (isWithin(hop, pkgDir) || isWithin(hop, pkgCanon)) {
+			return "", fmt.Errorf("%s is inside the package being replaced for %q; install from the original file instead", src, name)
+		}
 	}
 	if err := os.MkdirAll(binDir, 0o750); err != nil {
 		return "", fmt.Errorf("create plugin dir: %w", err)
@@ -213,6 +230,49 @@ func (r *Registry) isExecutable(path string, info os.FileInfo) bool {
 func (r *Registry) samePath(a, b string) bool {
 	a, b = filepath.Clean(a), filepath.Clean(b)
 	return a == b || r.isWindows() && strings.EqualFold(a, b)
+}
+
+// maxSymlinkHops bounds symlinkChain, as the kernel bounds symlink loops.
+const maxSymlinkHops = 40
+
+// symlinkChain returns every path the absolute path abs passes through as
+// its symlinks are followed: abs itself, then each link target, ending at
+// the real file. Each hop has its directory resolved (canonical), so it
+// compares against registry paths that went through canonical too.
+func symlinkChain(abs string) ([]string, error) {
+	var chain []string
+	p := abs
+	for range maxSymlinkHops {
+		p = canonical(p)
+		chain = append(chain, p)
+		info, err := os.Lstat(p)
+		if err != nil {
+			return nil, err
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			return chain, nil
+		}
+		target, err := os.Readlink(p)
+		if err != nil {
+			return nil, err
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(p), target)
+		}
+		p = target
+	}
+	return nil, errors.New("too many levels of symbolic links")
+}
+
+// canonical resolves the symlinks in path's directory but not in path
+// itself, so a registry entry (often a symlink) keeps its own name. A
+// directory that doesn't exist yet is left as is.
+func canonical(path string) string {
+	dir, err := filepath.EvalSymlinks(filepath.Dir(path))
+	if err != nil {
+		return filepath.Clean(path)
+	}
+	return filepath.Join(dir, filepath.Base(path))
 }
 
 // isWithin reports whether path is inside dir.
