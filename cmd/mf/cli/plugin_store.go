@@ -71,7 +71,7 @@ func PrependPluginBinDirToPATH() {
 // pluginDataDir is the data dir removePlugin purges. Launched plugins get
 // theirs from the registry.
 func pluginDataDir(name string) (string, error) {
-	if err := validatePluginName(name); err != nil {
+	if err := registry.ValidateName(name); err != nil {
 		return "", err
 	}
 	parent, err := pluginParentDir()
@@ -79,11 +79,6 @@ func pluginDataDir(name string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(parent, "data", name), nil
-}
-
-// validatePluginName applies the registry's name rule.
-func validatePluginName(name string) error {
-	return registry.ValidateName(name) //nolint:wrapcheck // already names the plugin; callers add context
 }
 
 // pluginNameFromPath derives a plugin name from a binary path:
@@ -213,7 +208,7 @@ func linkIntoBinDir(target, name string) (string, error) {
 
 // installLocalPlugin links src into the managed bin dir as mf-<name>.
 func installLocalPlugin(src, name string, force bool) (string, error) {
-	if err := validatePluginName(name); err != nil {
+	if err := registry.ValidateName(name); err != nil {
 		return "", err
 	}
 	abs, err := filepath.Abs(src)
@@ -257,7 +252,7 @@ func copyExecutable(src, dst string) (err error) {
 // removePlugin deletes the managed entry and package for name. Data is
 // kept unless purge.
 func removePlugin(name string, purge bool) error {
-	if err := validatePluginName(name); err != nil {
+	if err := registry.ValidateName(name); err != nil {
 		return err
 	}
 	existing, err := managedEntries(name)
@@ -319,7 +314,7 @@ func discoverPlugins() []pluginEntry {
 				continue
 			}
 			name := pluginNameFromPath(e.Name())
-			if seen[name] || validatePluginName(name) != nil {
+			if seen[name] || registry.ValidateName(name) != nil {
 				continue
 			}
 			path := filepath.Join(dir, e.Name())

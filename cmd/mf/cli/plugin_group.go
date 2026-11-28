@@ -91,14 +91,14 @@ func parseInstallSource(arg string) (installSource, error) {
 		}
 		m := ownerNameRe.FindStringSubmatch(arg)
 		name := strings.TrimPrefix(m[2], pluginBinaryPrefix)
-		if err := validatePluginName(name); err != nil {
+		if err := registry.ValidateName(name); err != nil {
 			return installSource{}, err
 		}
 		return installSource{Kind: installFromRepo, Ref: conventionRepoURL(m[1], name), Name: name}, nil
 	case strings.ContainsAny(arg, `/\`):
 		return installSource{}, fmt.Errorf("%q is neither owner/name nor an explicit path; local paths start with ./, ../ or /", arg)
 	default:
-		if err := validatePluginName(arg); err != nil {
+		if err := registry.ValidateName(arg); err != nil {
 			return installSource{}, err
 		}
 		return installSource{Kind: installFromRepo, Ref: conventionRepoURL(defaultPluginOwner, arg), Name: arg, Bare: true}, nil

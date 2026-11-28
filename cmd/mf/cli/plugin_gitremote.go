@@ -17,6 +17,8 @@ import (
 	"strings"
 
 	"golang.org/x/mod/semver"
+
+	"github.com/mguilarducci/mf-cli/cmd/mf/internal/registry"
 )
 
 // Remote plugin sources are git repositories. Tags and metadata are read with
@@ -169,7 +171,7 @@ func pluginNameFromRepoURL(repoURL string) (string, error) {
 			base, pluginBinaryPrefix, pluginMetadataFileName)
 	}
 	name := strings.TrimPrefix(base, pluginBinaryPrefix)
-	if err := validatePluginName(name); err != nil {
+	if err := registry.ValidateName(name); err != nil {
 		return "", err
 	}
 	return name, nil

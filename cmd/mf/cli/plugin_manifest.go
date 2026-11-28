@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/mguilarducci/mf-cli/cmd/mf/internal/registry"
 )
 
 // Managed-install manifests. A plugin installed from a remote repository
@@ -51,7 +53,7 @@ func ParsePluginMetadata(data []byte) (*PluginMetadata, error) {
 		return nil, fmt.Errorf("parse %s: %w", pluginMetadataFileName, err)
 	}
 	if m.Name != "" {
-		if err := validatePluginName(m.Name); err != nil {
+		if err := registry.ValidateName(m.Name); err != nil {
 			return nil, fmt.Errorf("%s: %w", pluginMetadataFileName, err)
 		}
 	}
@@ -76,7 +78,7 @@ type PluginManifest struct {
 
 // PluginPkgDir returns the per-plugin package directory. Not created.
 func PluginPkgDir(name string) (string, error) {
-	if err := validatePluginName(name); err != nil {
+	if err := registry.ValidateName(name); err != nil {
 		return "", err
 	}
 	parent, err := pluginParentDir()
