@@ -44,6 +44,24 @@ func TestRelativeDirIsMadeAbsolute(t *testing.T) {
 	}
 }
 
+// The snapshot's OS decides what is absolute, so a registry dir for another
+// OS is kept as is whatever the host.
+func TestAbsoluteDirFollowsSnapshotOS(t *testing.T) {
+	t.Parallel()
+	cases := []registry.Env{
+		{PluginDir: `C:\reg`, GOOS: "windows"},
+		{PluginDir: `C:/reg`, GOOS: "windows"},
+		{PluginDir: `\\server\share\reg`, GOOS: "windows"},
+		{PluginDir: "/reg", GOOS: "linux"},
+	}
+	for _, env := range cases {
+		got, err := registry.New(env).Dir()
+		if err != nil || got != env.PluginDir {
+			t.Errorf("Dir() on %s = %q, %v; want %q", env.GOOS, got, err, env.PluginDir)
+		}
+	}
+}
+
 func TestUnavailableWithoutHome(t *testing.T) {
 	t.Parallel()
 	r := registry.New(registry.Env{Path: []string{t.TempDir()}})

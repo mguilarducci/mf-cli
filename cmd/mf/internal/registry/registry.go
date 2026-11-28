@@ -6,6 +6,7 @@ package registry
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 )
 
 // Env is the snapshot of the environment the registry is built from.
@@ -37,7 +38,7 @@ func New(env Env) *Registry {
 	case env.Home != "":
 		r.dir = filepath.Join(env.Home, ".local", "share", "mf", "plugins")
 	}
-	if r.dir != "" {
+	if r.dir != "" && !r.isAbs(r.dir) {
 		abs, err := filepath.Abs(r.dir)
 		if err != nil {
 			abs = ""
@@ -45,6 +46,23 @@ func New(env Env) *Registry {
 		r.dir = abs
 	}
 	return r
+}
+
+// isAbs reports whether path is absolute by the snapshot's OS rules,
+// whatever the host: on Windows a drive root (C:\, C:/) or a UNC path, else
+// a leading slash.
+func (r *Registry) isAbs(path string) bool {
+	if !r.isWindows() {
+		return strings.HasPrefix(path, "/")
+	}
+	if filepath.IsAbs(path) || strings.HasPrefix(path, `\\`) || strings.HasPrefix(path, "//") {
+		return true
+	}
+	if len(path) < 3 || path[1] != ':' || (path[2] != '\\' && path[2] != '/') {
+		return false
+	}
+	drive := path[0] | 0x20 // lowercase ASCII letter
+	return 'a' <= drive && drive <= 'z'
 }
 
 // ErrUnavailable is returned by operations that need the registry directory
