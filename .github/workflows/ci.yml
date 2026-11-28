@@ -7,26 +7,20 @@ on:
     branches:
       - main
 
+concurrency:
+  group: test-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
 jobs:
-  test-core:
-    runs-on: ubuntu-latest
+  unit:
+    strategy:
+      matrix:
+        runner: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - uses: jdx/mise-action@f10502fc09dadecfefb962fff68ce77213930204 # v4
-      - name: Core Tests
-        env:
-          GO_TEST_PARALLEL: "16"
-        run: mise run test:ci:core
-
-  test-windows:
-    runs-on: windows-latest
-    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -34,8 +28,30 @@ jobs:
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
-      - name: Windows unit tests
-        run: go test ./... -count=1
+      # Same command as `mise run test:ci:core`, inlined so it also runs on
+      # Windows, where mise's sh file tasks are not available.
+      - name: Unit tests
+        run: go test -race -parallel=16 ./...
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        goos: [darwin, linux, windows]
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: go build ./...
 
   # Single required status check: branch protection points at this job, so
   # adding or renaming a job above never needs a settings change.
@@ -43,11 +59,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions: {}
     needs:
-      - test-core
-      - test-windows
+      - unit
+      - build
     if: ${{ always() }}
     steps:
       - name: Check dependencies
         run: |
-          [ "${{ needs.test-core.result }}" = "success" ]
-          [ "${{ needs.test-windows.result }}" = "success" ]
+          [ "${{ needs.unit.result }}" = "success" ]
+          [ "${{ needs.build.result }}" = "success" ]
