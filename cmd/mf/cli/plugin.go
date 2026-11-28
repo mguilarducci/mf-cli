@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mguilarducci/mf-cli/cmd/mf/cli/versioninfo"
+	"github.com/mguilarducci/mf-cli/cmd/mf/internal/registry"
 )
 
 // External-command resolution, kubectl-style (same model as entireio/cli).
@@ -26,12 +27,12 @@ const windowsGOOS = "windows"
 
 // MaybeRunPlugin returns (true, exitCode) when a plugin was resolved and run,
 // and (false, 0) when the caller should fall through to Cobra.
-func MaybeRunPlugin(ctx context.Context, root *cobra.Command, args []string) (handled bool, exitCode int) {
+func MaybeRunPlugin(ctx context.Context, reg *registry.Registry, root *cobra.Command, args []string) (handled bool, exitCode int) {
 	binPath, pluginArgs, ok := resolvePlugin(root, args)
 	if !ok {
 		return false, 0
 	}
-	return true, runPlugin(ctx, args[0], binPath, pluginArgs)
+	return true, runPlugin(ctx, reg, args[0], binPath, pluginArgs)
 }
 
 func resolvePlugin(root *cobra.Command, args []string) (binPath string, pluginArgs []string, ok bool) {
@@ -55,7 +56,7 @@ func resolvePlugin(root *cobra.Command, args []string) (binPath string, pluginAr
 	return binPath, args[1:], true
 }
 
-func runPlugin(ctx context.Context, name, binPath string, args []string) int {
+func runPlugin(ctx context.Context, reg *registry.Registry, name, binPath string, args []string) int {
 	cmd := exec.CommandContext(ctx, binPath, args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 
@@ -63,7 +64,7 @@ func runPlugin(ctx context.Context, name, binPath string, args []string) int {
 		"MF_CLI_VERSION=" + versioninfo.Version,
 		"MF_PLUGIN_NAME=" + name,
 	}
-	if dataDir, err := PluginDataDir(name); err == nil {
+	if dataDir, err := reg.DataDir(name); err == nil {
 		extras = append(extras, "MF_PLUGIN_DATA_DIR="+dataDir)
 	}
 	cmd.Env = pluginEnv(os.Environ(), name, extras...)

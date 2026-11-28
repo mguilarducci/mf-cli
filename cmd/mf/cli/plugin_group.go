@@ -19,9 +19,11 @@ import (
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
+
+	"github.com/mguilarducci/mf-cli/cmd/mf/internal/registry"
 )
 
-func newPluginGroupCmd() *cobra.Command {
+func newPluginGroupCmd(_ *registry.Registry) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "plugin",
 		Aliases: []string{"plugins"},
