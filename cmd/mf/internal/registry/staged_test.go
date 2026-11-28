@@ -241,7 +241,7 @@ func TestInstallStagedWithRelativeDirResolvesAndRuns(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		return
 	}
-	if out, err := exec.Command(p.Path).CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(t.Context(), p.Path).CombinedOutput(); err != nil {
 		t.Errorf("run %s: %v: %s", p.Path, err, out)
 	}
 }
