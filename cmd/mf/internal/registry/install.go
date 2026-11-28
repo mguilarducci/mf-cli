@@ -199,7 +199,9 @@ func (r *Registry) entryName(name, src string) string {
 }
 
 // isExecutable reports whether path can be run as a plugin. Windows has no
-// executable bit, so it goes by PATHEXT extension.
+// executable bit, so it goes by PATHEXT extension. Elsewhere the current user
+// needs execute access, not just any execute bit; the snapshot's GOOS picks
+// the rule and the host makes the access check.
 func (r *Registry) isExecutable(path string, info os.FileInfo) bool {
 	if !info.Mode().IsRegular() {
 		return false
@@ -208,7 +210,7 @@ func (r *Registry) isExecutable(path string, info os.FileInfo) bool {
 		ext := strings.ToLower(filepath.Ext(path))
 		return ext != "" && slices.Contains(r.pathExts(), ext)
 	}
-	return info.Mode().Perm()&0o111 != 0
+	return info.Mode().Perm()&0o111 != 0 && hostCanExecute(path)
 }
 
 // samePath reports whether a and b name the same file path once cleaned.

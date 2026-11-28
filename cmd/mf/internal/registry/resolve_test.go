@@ -146,3 +146,32 @@ func TestWindowsResolvesByPathExt(t *testing.T) {
 		})
 	}
 }
+
+// An execute bit the current user doesn't have doesn't make a file runnable:
+// lookup skips it for a later copy the user can run, as exec.LookPath does.
+func TestUnixSkipsFileTheUserCannotExecute(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no execute bit")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root passes every execute access check")
+	}
+	for _, mode := range []os.FileMode{0o610, 0o601} {
+		t.Run(mode.String(), func(t *testing.T) {
+			t.Parallel()
+			first, second := t.TempDir(), t.TempDir()
+			blocked := writeFile(t, first, "mf-hello", mode)
+			if err := os.Chmod(blocked, mode); err != nil { // not subject to umask
+				t.Fatal(err)
+			}
+			want := writePlugin(t, second, "hello")
+			r := registry.New(registry.Env{Path: []string{first, second}, GOOS: runtime.GOOS})
+
+			p, ok := r.Resolve("hello")
+			if !ok || p.Path != want {
+				t.Errorf("Resolve(hello) = %+v, %v; want %s", p, ok, want)
+			}
+		})
+	}
+}
