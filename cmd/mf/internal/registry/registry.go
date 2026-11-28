@@ -24,7 +24,9 @@ type Registry struct {
 	dir string
 }
 
-// New builds a registry from env.
+// New builds a registry from env. The directory is made absolute here, once,
+// so every path the registry compares or links to is absolute; if it can't
+// be, the registry is unavailable.
 func New(env Env) *Registry {
 	r := &Registry{env: env}
 	switch {
@@ -34,6 +36,13 @@ func New(env Env) *Registry {
 		r.dir = filepath.Join(env.XDGDataHome, "mf", "plugins")
 	case env.Home != "":
 		r.dir = filepath.Join(env.Home, ".local", "share", "mf", "plugins")
+	}
+	if r.dir != "" {
+		abs, err := filepath.Abs(r.dir)
+		if err != nil {
+			abs = ""
+		}
+		r.dir = abs
 	}
 	return r
 }

@@ -2,6 +2,7 @@ package registry_test
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -28,6 +29,18 @@ func TestDirPrecedence(t *testing.T) {
 				t.Errorf("Dir() = %q, %v; want %q", got, err, c.want)
 			}
 		})
+	}
+}
+
+func TestRelativeDirIsMadeAbsolute(t *testing.T) {
+	t.Parallel()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := registry.New(registry.Env{PluginDir: filepath.Join("rel", "plugins")}).Dir()
+	if want := filepath.Join(cwd, "rel", "plugins"); err != nil || got != want {
+		t.Errorf("Dir() = %q, %v; want %q", got, err, want)
 	}
 }
 

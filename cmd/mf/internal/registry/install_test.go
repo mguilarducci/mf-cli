@@ -228,3 +228,27 @@ func TestInstallForceRefusesSourceInsideReplacedPackage(t *testing.T) {
 	}
 	assertEntryPointsAt(t, dst, pkgBin)
 }
+
+// A relative MF_PLUGIN_DIR must not defeat the checks that keep a forced
+// install from deleting the package that holds its own source.
+func TestInstallForceWithRelativeDirRefusesSourceInsidePackage(t *testing.T) {
+	t.Chdir(t.TempDir())
+	r := registry.New(registry.Env{PluginDir: "plugins", GOOS: runtime.GOOS})
+	pkg := filepath.Join("plugins", "pkg", "hello")
+	if err := os.MkdirAll(pkg, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	pkgBin, err := filepath.Abs(writeExecutable(t, filepath.Join(pkg, "mf-hello"+hostExt())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst, err := r.InstallLocal(pkgBin, "hello", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := r.InstallLocal(pkgBin, "hello", true); err == nil {
+		t.Fatal("forced install from the package it replaces, relative registry dir: want error")
+	}
+	assertEntryPointsAt(t, dst, pkgBin)
+}
