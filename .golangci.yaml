@@ -90,6 +90,10 @@ linters:
       require-specific: true
     unparam:
       check-exported: true
+    wrapcheck:
+      extra-ignore-sigs:
+        # Already names the plugin; callers add context where it helps.
+        - registry.ValidateName(
   exclusions:
     presets:
       - comments

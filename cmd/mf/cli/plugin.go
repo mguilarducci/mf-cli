@@ -40,7 +40,7 @@ func resolvePlugin(root *cobra.Command, args []string) (binPath string, pluginAr
 		return "", nil, false
 	}
 	name := args[0]
-	if validatePluginName(name) != nil {
+	if registry.ValidateName(name) != nil {
 		return "", nil, false
 	}
 	// Built-ins (including Cobra's lazily-added help/completion) win.

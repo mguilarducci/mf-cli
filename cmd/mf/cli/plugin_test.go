@@ -11,29 +11,6 @@ import (
 	"github.com/mguilarducci/mf-cli/cmd/mf/internal/registry"
 )
 
-func TestValidatePluginName(t *testing.T) {
-	cases := []struct {
-		name string
-		ok   bool
-	}{
-		{"digisac", true},
-		{"my-tool", true},
-		{"tool_2", true},
-		{"", false},
-		{"-flag", false},
-		{"--help", false},
-		{"Upper", false},
-		{"a/b", false},
-		{"..", false},
-		{"with space", false},
-	}
-	for _, c := range cases {
-		if err := validatePluginName(c.name); (err == nil) != c.ok {
-			t.Errorf("validatePluginName(%q) err = %v, want ok=%v", c.name, err, c.ok)
-		}
-	}
-}
-
 func TestPluginNameFromPath(t *testing.T) {
 	cases := map[string]string{
 		"./bin/mf-digisac": "digisac",
