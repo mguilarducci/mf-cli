@@ -3,6 +3,7 @@ package registry_test
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -222,4 +223,25 @@ func TestInstallStagedRejectsBadManifest(t *testing.T) {
 	}
 	assertBinDir(t, dir)
 	assertPkgDir(t, dir)
+}
+
+// With a relative MF_PLUGIN_DIR the entry must still point at the package,
+// not at a relative path that dangles from inside bin/.
+func TestInstallStagedWithRelativeDirResolvesAndRuns(t *testing.T) {
+	t.Chdir(t.TempDir())
+	r := registry.New(registry.Env{PluginDir: "plugins", GOOS: runtime.GOOS})
+	if _, err := r.InstallStaged(stage(t), manifest("v1.0.0"), false); err != nil {
+		t.Fatal(err)
+	}
+
+	p, ok := r.Resolve("hello")
+	if !ok {
+		t.Fatal("Resolve(hello) found nothing after a staged install into a relative registry dir")
+	}
+	if runtime.GOOS == "windows" {
+		return
+	}
+	if out, err := exec.Command(p.Path).CombinedOutput(); err != nil {
+		t.Errorf("run %s: %v: %s", p.Path, err, out)
+	}
 }
