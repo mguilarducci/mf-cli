@@ -30,7 +30,7 @@ type RemoteInstallOptions struct {
 
 // InstallPluginFromRepo installs the newest stable release of repoURL (or
 // opts.Pin). expectedName, when set, must match the plugin's declared name.
-func InstallPluginFromRepo(ctx context.Context, reg *registry.Registry, repoURL, expectedName string, opts RemoteInstallOptions) (*PluginManifest, error) {
+func InstallPluginFromRepo(ctx context.Context, reg *registry.Registry, repoURL, expectedName string, opts RemoteInstallOptions) (*registry.Manifest, error) {
 	repoURL = strings.TrimRight(repoURL, "/")
 	tags := []string{opts.Pin}
 	if opts.Pin == "" {
@@ -61,7 +61,7 @@ func InstallPluginFromRepo(ctx context.Context, reg *registry.Registry, repoURL,
 	return nil, lastErr
 }
 
-func installRepoAtTag(ctx context.Context, reg *registry.Registry, repoURL, expectedName, tag string, opts RemoteInstallOptions) (*PluginManifest, error) {
+func installRepoAtTag(ctx context.Context, reg *registry.Registry, repoURL, expectedName, tag string, opts RemoteInstallOptions) (*registry.Manifest, error) {
 	step(opts.Progress, "Reading %s at %s", pluginMetadataFileName, tag)
 	meta, err := fetchPluginMetadataAtTag(ctx, repoURL, tag)
 	if err != nil {
@@ -91,7 +91,7 @@ func installRepoAtTag(ctx context.Context, reg *registry.Registry, repoURL, expe
 		return nil, err
 	}
 
-	manifest := &PluginManifest{
+	manifest := &registry.Manifest{
 		Name:        name,
 		RepoURL:     repoURL,
 		Tag:         tag,
@@ -104,8 +104,8 @@ func installRepoAtTag(ctx context.Context, reg *registry.Registry, repoURL, expe
 	if meta != nil {
 		manifest.Description = meta.Description
 	}
-	if err := placeStagedBinary(reg, staged, manifest, opts.Force); err != nil {
-		return nil, err
+	if _, err := reg.InstallStaged(staged, manifest, opts.Force); err != nil {
+		return nil, fmt.Errorf("install plugin %q: %w", name, err)
 	}
 	return manifest, nil
 }
@@ -126,41 +126,6 @@ func remotePluginName(meta *PluginMetadata, repoURL, expectedName string) (strin
 			redactURL(repoURL), name, expectedName)
 	}
 	return name, nil
-}
-
-// placeStagedBinary moves the binary into pkg/<name>/, writes the manifest,
-// and points bin/mf-<name> at it. With force, the old Managed plugin is
-// removed (data kept) only now, once the new binary is downloaded.
-func placeStagedBinary(reg *registry.Registry, staged string, m *PluginManifest, force bool) error {
-	if force {
-		if err := reg.Remove(m.Name, false); err != nil && !errors.Is(err, registry.ErrNotManaged) {
-			return fmt.Errorf("replace plugin %q: %w", m.Name, err)
-		}
-	}
-	pkgDir, err := PluginPkgDir(m.Name)
-	if err != nil {
-		return err
-	}
-	if err := os.RemoveAll(pkgDir); err != nil {
-		return fmt.Errorf("clear previous install: %w", err)
-	}
-	if err := os.MkdirAll(pkgDir, 0o750); err != nil {
-		return fmt.Errorf("create plugin pkg dir: %w", err)
-	}
-	pkgBin := filepath.Join(pkgDir, pluginBinaryName(m.Name))
-	if err := os.Rename(staged, pkgBin); err != nil {
-		// Staging may be on another filesystem (TMPDIR); fall back to a copy.
-		if err := copyExecutable(staged, pkgBin); err != nil {
-			return err
-		}
-	}
-	if err := SavePluginManifest(m); err != nil {
-		return err
-	}
-	if _, err := reg.InstallLocal(pkgBin, m.Name, false); err != nil {
-		return fmt.Errorf("link plugin %q: %w", m.Name, err)
-	}
-	return nil
 }
 
 // pluginBinaryName is the on-disk executable name for a plugin.

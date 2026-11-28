@@ -6,26 +6,14 @@ package cli
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"go.yaml.in/yaml/v3"
 
 	"github.com/mguilarducci/mf-cli/cmd/mf/internal/registry"
 )
 
-// Managed-install manifests. A plugin installed from a remote repository
-// gets a per-plugin home under the managed dir:
-//
-//	<parent>/pkg/<name>/mf-<name>      the downloaded binary
-//	<parent>/pkg/<name>/manifest.yml   how it was installed
-//
-// bin/mf-<name> links to the pkg binary, so the PATH dispatcher never changes.
-// Local installs (`mf plugin install ./path`) have no manifest.
-
 const (
 	pluginMetadataFileName = "mf-plugin.yml"
-	pluginManifestFileName = "manifest.yml" // must match the registry's
 	maxPluginMetadataSize  = 64 << 10
 )
 
@@ -59,36 +47,4 @@ func ParsePluginMetadata(data []byte) (*PluginMetadata, error) {
 		return nil, fmt.Errorf("%s must not contain control characters", pluginMetadataFileName)
 	}
 	return &m, nil
-}
-
-// PluginManifest records how a managed plugin was installed. The registry
-// owns the type, since it loads manifests for the Plugins it lists.
-type PluginManifest = registry.Manifest
-
-// PluginPkgDir returns the per-plugin package directory. Not created.
-func PluginPkgDir(name string) (string, error) {
-	if err := registry.ValidateName(name); err != nil {
-		return "", err
-	}
-	parent, err := pluginParentDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(parent, "pkg", name), nil
-}
-
-// SavePluginManifest writes the manifest into the plugin's pkg dir.
-func SavePluginManifest(m *PluginManifest) error {
-	dir, err := PluginPkgDir(m.Name)
-	if err != nil {
-		return err
-	}
-	data, err := yaml.Marshal(m)
-	if err != nil {
-		return fmt.Errorf("encode plugin manifest: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, pluginManifestFileName), data, 0o600); err != nil {
-		return fmt.Errorf("write plugin manifest: %w", err)
-	}
-	return nil
 }

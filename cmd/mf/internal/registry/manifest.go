@@ -49,3 +49,14 @@ func (r *Registry) loadManifest(name string) (*Manifest, error) {
 	}
 	return &m, nil
 }
+
+func writeManifest(pkgDir string, m *Manifest) error {
+	data, err := yaml.Marshal(m)
+	if err != nil {
+		return fmt.Errorf("encode plugin manifest: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgDir, manifestFileName), data, 0o600); err != nil {
+		return fmt.Errorf("write plugin manifest: %w", err)
+	}
+	return nil
+}

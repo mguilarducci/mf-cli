@@ -105,3 +105,24 @@ func TestWindowsRemoveDeletesEveryVariant(t *testing.T) {
 	}
 	assertBinDir(t, dir, "mf-other.exe")
 }
+
+func TestWindowsInstallStagedReplacesEveryVariant(t *testing.T) {
+	t.Parallel()
+	r, dir := windowsRegistry(t, "")
+	if _, err := r.InstallLocal(writePlain(t, filepath.Join(t.TempDir(), "mf-hello.bat")), "hello", false); err != nil {
+		t.Fatal(err)
+	}
+	staged := writePlain(t, filepath.Join(t.TempDir(), "extracted-mf-hello.exe"))
+
+	dst, err := r.InstallStaged(staged, &registry.Manifest{Name: "hello", Tag: "v1.0.0"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(dir, "bin", "mf-hello.exe"); dst != want {
+		t.Errorf("InstallStaged() = %q; want %q", dst, want)
+	}
+	assertBinDir(t, dir, "mf-hello.exe")
+	if _, err := os.Stat(filepath.Join(dir, "pkg", "hello", "mf-hello.exe")); err != nil {
+		t.Errorf("package binary: %v", err)
+	}
+}

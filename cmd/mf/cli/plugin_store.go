@@ -6,7 +6,6 @@ package cli
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -37,24 +36,3 @@ func pluginParentDir() (string, error) {
 }
 
 func isWindows() bool { return runtime.GOOS == windowsGOOS }
-
-func copyExecutable(src, dst string) (err error) {
-	in, err := os.Open(src) //nolint:gosec // src is the path the user asked to install
-	if err != nil {
-		return fmt.Errorf("open plugin: %w", err)
-	}
-	defer func() { _ = in.Close() }()
-	//nolint:gosec // dst is inside the managed bin dir; plugins must be executable
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
-	if err != nil {
-		return fmt.Errorf("create plugin copy: %w", err)
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		_ = out.Close()
-		return fmt.Errorf("copy plugin: %w", err)
-	}
-	if err := out.Close(); err != nil {
-		return fmt.Errorf("write plugin copy: %w", err)
-	}
-	return nil
-}
