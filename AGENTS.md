@@ -21,7 +21,7 @@ Releases: run the `changelog` skill (`.claude/skills/changelog`) first, then `mi
 
 - **Dispatch happens before Cobra.** `main.go` prepends the managed plugin bin dir to `PATH`, then calls `MaybeRunPlugin`. For `mf <name>`, if `<name>` is not a built-in command (`help` and `completion` included), the `mf-<name>` binary found on `PATH` runs with stdio and exit code passed through. Plugins are not Cobra commands; they only appear in root help (`plugin_help.go`).
 - **Plugin environment is an allowlist** (`plugin_env.go`). A plugin doesn't get the full parent env: it gets a fixed allowlist, its own `<NAME>_*` vars (for example `DIGISAC_*` for `mf-digisac`), anything listed in `MF_PLUGIN_ENV`, plus `MF_CLI_VERSION`, `MF_PLUGIN_NAME` and `MF_PLUGIN_DATA_DIR`.
-- **Managed store** (`plugin_store.go`, `plugin_manifest.go`), under `MF_PLUGIN_DIR`, else `$XDG_DATA_HOME/mf/plugins`, else `~/.local/share/mf/plugins`:
+- **Plugin registry** (`plugin_store.go`, `plugin_manifest.go`), under `MF_PLUGIN_DIR`, else `$XDG_DATA_HOME/mf/plugins`, else `~/.local/share/mf/plugins`:
   - `bin/mf-<name>`: the dispatch surface (a symlink, or a copy as fallback)
   - `pkg/<name>/`: remote installs, holding the binary and `manifest.yml`. Local-path installs have no manifest.
   - `data/<name>/`: per-plugin storage. The plugin creates it.
