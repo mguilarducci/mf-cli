@@ -13,7 +13,7 @@ Tooling is pinned in `mise.toml`. Keep the Go version there aligned with `go.mod
 - Single test: `go test ./cmd/mf/cli -run TestPluginEnv`
 - `mise run release:snapshot`: build release archives locally with goreleaser
 
-Releases: run the `changelog` skill (`.claude/skills/changelog`) first, then `mise run release vX.Y.Z`. That command needs a clean tree and a `## [X.Y.Z]` entry in `CHANGELOG.md`, because the release workflow publishes that section as the release notes. Version and commit are injected through ldflags into `cmd/mf/cli/versioninfo`.
+Releases: `mise run release vX.Y.Z` (needs a clean tree) tags and pushes; the release workflow runs goreleaser, and GitHub generates the release notes from the merged PRs since the previous tag. Version and commit are injected through ldflags into `cmd/mf/cli/versioninfo`.
 
 ## Architecture
 

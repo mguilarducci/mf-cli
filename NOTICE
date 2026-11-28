@@ -11,7 +11,6 @@ Their full license texts are in third_party/licenses/.
   - cmd/mf/cli/plugin*.go (kubectl-style plugin dispatch, managed plugin
     store, plugin environment allowlist, plugin help section)
   - mise.toml, mise-tasks/, .golangci.yaml, .goreleaser.yaml,
-    .claude/skills/changelog/,
     .github/workflows/, .github/dependabot.yml (build, lint, CI and release)
   - scripts/install.sh (also adapted from entireio/entire-brain,
     Copyright (c) 2026 Entire Inc., MIT License)
