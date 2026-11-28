@@ -17,7 +17,7 @@ Releases: run the `changelog` skill (`.claude/skills/changelog`) first, then `mi
 
 ## Architecture
 
-`mf` is a kubectl-style plugin aggregator. All code is in `cmd/mf/cli` (Cobra).
+`mf` is a kubectl-style plugin aggregator. The CLI is in `cmd/mf/cli` (Cobra). The **Plugin registry** is moving into `cmd/mf/internal/registry` (no Cobra), built once in `main.go` from an explicit environment snapshot and passed to the root command and the dispatcher.
 
 - **Dispatch happens before Cobra.** `main.go` prepends the managed plugin bin dir to `PATH`, then calls `MaybeRunPlugin`. For `mf <name>`, if `<name>` is not a built-in command (`help` and `completion` included), the `mf-<name>` binary found on `PATH` runs with stdio and exit code passed through. Plugins are not Cobra commands; they only appear in root help (`plugin_help.go`).
 - **Plugin environment is an allowlist** (`plugin_env.go`). A plugin doesn't get the full parent env: it gets a fixed allowlist, its own `<NAME>_*` vars (for example `DIGISAC_*` for `mf-digisac`), anything listed in `MF_PLUGIN_ENV`, plus `MF_CLI_VERSION`, `MF_PLUGIN_NAME` and `MF_PLUGIN_DATA_DIR`.

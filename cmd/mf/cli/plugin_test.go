@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/mguilarducci/mf-cli/cmd/mf/internal/registry"
 )
 
 func TestValidatePluginName(t *testing.T) {
@@ -88,20 +90,12 @@ func TestPluginEnvPrefix(t *testing.T) {
 	}
 }
 
-func TestPluginDirs(t *testing.T) {
+func TestPluginBinDir(t *testing.T) {
 	t.Setenv("MF_PLUGIN_DIR", "")
 	xdg := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", xdg)
 	if got, err := PluginBinDir(); err != nil || got != filepath.Join(xdg, "mf", "plugins", "bin") {
 		t.Errorf("PluginBinDir() = %q, %v", got, err)
-	}
-	custom := t.TempDir()
-	t.Setenv("MF_PLUGIN_DIR", custom)
-	if got, err := PluginDataDir("digisac"); err != nil || got != filepath.Join(custom, "data", "digisac") {
-		t.Errorf("PluginDataDir() = %q, %v", got, err)
-	}
-	if _, err := PluginDataDir("../escape"); err == nil {
-		t.Error("PluginDataDir(\"../escape\"): want error")
 	}
 }
 
@@ -109,15 +103,7 @@ func TestPluginDirs(t *testing.T) {
 // and returns the path it wrote.
 func writeExecutable(t *testing.T, path string) string {
 	t.Helper()
-	body := "#!/bin/sh\nexit 0\n"
-	if runtime.GOOS == windowsGOOS {
-		path += ".bat"
-		body = "@exit /b 0\r\n"
-	}
-	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return path
+	return writeScript(t, path, "exit 0\n", "exit /b 0\r\n")
 }
 
 func TestInstallListRemove(t *testing.T) {
@@ -178,7 +164,7 @@ func TestResolvePlugin(t *testing.T) {
 	writeExecutable(t, filepath.Join(binDir, "mf-plugin")) // shadowed by built-in
 	t.Setenv("PATH", binDir)
 
-	root := NewRootCmd()
+	root := NewRootCmd(registry.New(registry.Env{}))
 	cases := []struct {
 		args     []string
 		ok       bool
@@ -200,7 +186,7 @@ func TestResolvePlugin(t *testing.T) {
 }
 
 func TestFormatPluginHelpSection(t *testing.T) {
-	root := NewRootCmd()
+	root := NewRootCmd(registry.New(registry.Env{}))
 	got := formatPluginHelpSection(root, []pluginEntry{{Name: "digisac"}, {Name: "plugin"}})
 	if !strings.Contains(got, "digisac") || !strings.Contains(got, "Plugin Commands:") {
 		t.Errorf("help section = %q", got)

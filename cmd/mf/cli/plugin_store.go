@@ -10,11 +10,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/mguilarducci/mf-cli/cmd/mf/internal/registry"
 )
 
 // Managed plugin storage. The dispatcher resolves `mf-<name>` from PATH,
@@ -51,19 +52,6 @@ func PluginBinDir() (string, error) {
 	return filepath.Join(parent, "bin"), nil
 }
 
-// PluginDataDir returns the per-plugin data directory. Not created: that is
-// the plugin's job on first use.
-func PluginDataDir(name string) (string, error) {
-	if err := validatePluginName(name); err != nil {
-		return "", err
-	}
-	parent, err := pluginParentDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(parent, "data", name), nil
-}
-
 // PrependPluginBinDirToPATH makes managed plugins discoverable. Silent on
 // failure: PATH-installed plugins still work.
 func PrependPluginBinDirToPATH() {
@@ -80,15 +68,22 @@ func PrependPluginBinDirToPATH() {
 	_ = os.Setenv("PATH", dir+string(os.PathListSeparator)+path)
 }
 
-var pluginNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
-
-// validatePluginName rejects names the dispatcher would never invoke:
-// empty, flag-shaped, path-like, or with uppercase/odd characters.
-func validatePluginName(name string) error {
-	if !pluginNameRe.MatchString(name) {
-		return fmt.Errorf("invalid plugin name %q: use lowercase letters, digits, '-' or '_'", name)
+// pluginDataDir is the data dir removePlugin purges. Launched plugins get
+// theirs from the registry.
+func pluginDataDir(name string) (string, error) {
+	if err := validatePluginName(name); err != nil {
+		return "", err
 	}
-	return nil
+	parent, err := pluginParentDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(parent, "data", name), nil
+}
+
+// validatePluginName applies the registry's name rule.
+func validatePluginName(name string) error {
+	return registry.ValidateName(name) //nolint:wrapcheck // already names the plugin; callers add context
 }
 
 // pluginNameFromPath derives a plugin name from a binary path:
@@ -286,7 +281,7 @@ func removePlugin(name string, purge bool) error {
 		return fmt.Errorf("remove plugin package: %w", err)
 	}
 	if purge {
-		dataDir, err := PluginDataDir(name)
+		dataDir, err := pluginDataDir(name)
 		if err != nil {
 			return err
 		}
