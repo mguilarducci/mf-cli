@@ -7,8 +7,6 @@ import (
 	"strings"
 )
 
-const binaryPrefix = "mf-"
-
 // Plugin is one mf-<name> executable found on the Search path.
 type Plugin struct {
 	Name    string `json:"name"`
@@ -73,7 +71,7 @@ func (r *Registry) List() []Plugin {
 			if !ok {
 				continue
 			}
-			if r.windows() {
+			if r.isWindows() {
 				name = strings.TrimSuffix(name, filepath.Ext(name))
 			}
 			if seen[name] || ValidateName(name) != nil {
@@ -94,22 +92,20 @@ func (r *Registry) List() []Plugin {
 // each PATHEXT extension in order, as exec.LookPath does.
 func (r *Registry) findIn(dir, name string) (string, bool) {
 	base := filepath.Join(dir, binaryPrefix+name)
-	if !r.windows() {
-		info, err := os.Stat(base)
-		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
-			return "", false
+	candidates := []string{base}
+	if r.isWindows() {
+		candidates = nil
+		for _, ext := range r.pathExts() {
+			candidates = append(candidates, base+ext)
 		}
-		return base, true
 	}
-	for _, ext := range r.pathExts() {
-		if info, err := os.Stat(base + ext); err == nil && info.Mode().IsRegular() {
-			return base + ext, true
+	for _, path := range candidates {
+		if info, err := os.Stat(path); err == nil && r.isExecutable(path, info) {
+			return path, true
 		}
 	}
 	return "", false
 }
-
-func (r *Registry) windows() bool { return r.env.GOOS == "windows" }
 
 // pathExts is PATHEXT normalized like exec.LookPath: lower case, each with a
 // leading dot, defaulting to .com;.exe;.bat;.cmd when empty.
@@ -153,7 +149,7 @@ func (r *Registry) SearchPath() string {
 		dirs = append([]string{bin}, dirs...)
 	}
 	sep := ":"
-	if r.windows() {
+	if r.isWindows() {
 		sep = ";"
 	}
 	return strings.Join(dirs, sep)

@@ -1,7 +1,11 @@
 package cli
 
 import (
+	"bytes"
+	"encoding/json"
+	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -82,12 +86,13 @@ func writeExecutable(t *testing.T, path string) string {
 }
 
 func TestResolvePlugin(t *testing.T) {
+	t.Parallel()
 	binDir := t.TempDir()
 	writeExecutable(t, filepath.Join(binDir, "mf-hello"))
 	writeExecutable(t, filepath.Join(binDir, "mf-plugin")) // shadowed by built-in
-	t.Setenv("PATH", binDir)
 
-	root := NewRootCmd(registry.New(registry.Env{}))
+	reg := registry.New(registry.Env{Path: []string{binDir}, GOOS: runtime.GOOS})
+	root := NewRootCmd(reg)
 	cases := []struct {
 		args     []string
 		ok       bool
@@ -101,7 +106,7 @@ func TestResolvePlugin(t *testing.T) {
 		{nil, false, nil},
 	}
 	for _, c := range cases {
-		_, args, ok := resolvePlugin(root, c.args)
+		_, args, ok := resolvePlugin(reg, root, c.args)
 		if ok != c.ok || (ok && !slices.Equal(args, c.wantArgs)) {
 			t.Errorf("resolvePlugin(%v) = (%v, %v), want (%v, %v)", c.args, args, ok, c.wantArgs, c.ok)
 		}
@@ -110,7 +115,7 @@ func TestResolvePlugin(t *testing.T) {
 
 func TestFormatPluginHelpSection(t *testing.T) {
 	root := NewRootCmd(registry.New(registry.Env{}))
-	got := formatPluginHelpSection(root, []pluginEntry{{Name: "digisac"}, {Name: "plugin"}})
+	got := formatPluginHelpSection(root, []registry.Plugin{{Name: "digisac"}, {Name: "plugin"}})
 	if !strings.Contains(got, "digisac") || !strings.Contains(got, "Plugin Commands:") {
 		t.Errorf("help section = %q", got)
 	}
@@ -119,5 +124,66 @@ func TestFormatPluginHelpSection(t *testing.T) {
 	}
 	if formatPluginHelpSection(root, nil) != "" {
 		t.Error("empty plugin list should render nothing")
+	}
+}
+
+// registryWithPlugins builds a registry with a managed "managed" plugin and
+// an unmanaged "onpath" plugin.
+func registryWithPlugins(t *testing.T) *registry.Registry {
+	t.Helper()
+	regDir, pathDir := t.TempDir(), t.TempDir()
+	if err := os.MkdirAll(filepath.Join(regDir, "bin"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	writeExecutable(t, filepath.Join(regDir, "bin", "mf-managed"))
+	writeExecutable(t, filepath.Join(pathDir, "mf-onpath"))
+	return registry.New(registry.Env{PluginDir: regDir, Path: []string{pathDir}, GOOS: runtime.GOOS})
+}
+
+func runRoot(t *testing.T, reg *registry.Registry, args ...string) string {
+	t.Helper()
+	root := NewRootCmd(reg)
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs(args)
+	if err := root.Execute(); err != nil {
+		t.Fatalf("mf %v: %v", args, err)
+	}
+	return out.String()
+}
+
+func TestPluginListRendersRegistryList(t *testing.T) {
+	t.Parallel()
+	reg := registryWithPlugins(t)
+	var got []map[string]any
+	if err := json.Unmarshal([]byte(runRoot(t, reg, "plugin", "list", "-o", "json")), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := reg.List()
+	if len(got) != len(want) {
+		t.Fatalf("list json = %v; want %d plugins", got, len(want))
+	}
+	for i, p := range want {
+		if got[i]["name"] != p.Name || got[i]["path"] != p.Path || got[i]["managed"] != p.Managed {
+			t.Errorf("list json[%d] = %v; want %+v", i, got[i], p)
+		}
+	}
+
+	table := runRoot(t, reg, "plugin", "list")
+	for _, p := range want {
+		if !strings.Contains(table, p.Name) {
+			t.Errorf("list table missing %s:\n%s", p.Name, table)
+		}
+	}
+}
+
+func TestRootHelpRendersRegistryList(t *testing.T) {
+	t.Parallel()
+	help := runRoot(t, registryWithPlugins(t), "--help")
+	for _, want := range []string{"Plugin Commands:", "(plugin: mf-managed)", "(plugin: mf-onpath)"} {
+		if !strings.Contains(help, want) {
+			t.Errorf("help missing %q:\n%s", want, help)
+		}
 	}
 }

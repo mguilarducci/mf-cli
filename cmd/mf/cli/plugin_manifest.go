@@ -5,11 +5,9 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	"go.yaml.in/yaml/v3"
 
@@ -27,7 +25,7 @@ import (
 
 const (
 	pluginMetadataFileName = "mf-plugin.yml"
-	pluginManifestFileName = "manifest.yml"
+	pluginManifestFileName = "manifest.yml" // must match the registry's
 	maxPluginMetadataSize  = 64 << 10
 )
 
@@ -63,18 +61,9 @@ func ParsePluginMetadata(data []byte) (*PluginMetadata, error) {
 	return &m, nil
 }
 
-// PluginManifest records how a managed plugin was installed.
-type PluginManifest struct {
-	Name        string    `json:"name"                  yaml:"name"`
-	RepoURL     string    `json:"repo_url"              yaml:"repo_url"`
-	Tag         string    `json:"tag"                   yaml:"tag"`
-	Asset       string    `json:"asset,omitempty"       yaml:"asset,omitempty"`
-	SHA256      string    `json:"sha256,omitempty"      yaml:"sha256,omitempty"`
-	Unverified  bool      `json:"unverified,omitempty"  yaml:"unverified,omitempty"`
-	Pinned      bool      `json:"pinned,omitempty"      yaml:"pinned,omitempty"`
-	InstalledAt time.Time `json:"installed_at"          yaml:"installed_at"`
-	Description string    `json:"description,omitempty" yaml:"description,omitempty"`
-}
+// PluginManifest records how a managed plugin was installed. The registry
+// owns the type, since it loads manifests for the Plugins it lists.
+type PluginManifest = registry.Manifest
 
 // PluginPkgDir returns the per-plugin package directory. Not created.
 func PluginPkgDir(name string) (string, error) {
@@ -86,27 +75,6 @@ func PluginPkgDir(name string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(parent, "pkg", name), nil
-}
-
-// LoadPluginManifest returns (nil, nil) when the plugin has no manifest:
-// local installs and raw-PATH plugins.
-func LoadPluginManifest(name string) (*PluginManifest, error) {
-	dir, err := PluginPkgDir(name)
-	if err != nil {
-		return nil, err
-	}
-	data, err := os.ReadFile(filepath.Join(dir, pluginManifestFileName)) //nolint:gosec // inside the managed pkg dir
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil //nolint:nilnil // absence is the common case
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read plugin manifest: %w", err)
-	}
-	var m PluginManifest
-	if err := yaml.Unmarshal(data, &m); err != nil {
-		return nil, fmt.Errorf("parse plugin manifest: %w", err)
-	}
-	return &m, nil
 }
 
 // SavePluginManifest writes the manifest into the plugin's pkg dir.

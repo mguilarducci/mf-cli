@@ -32,7 +32,7 @@ func newPluginGroupCmd(reg *registry.Registry) *cobra.Command {
 with 'mf plugin install', and run it as 'mf <name>'.`,
 		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
-	cmd.AddCommand(newPluginInstallCmd(reg), newPluginListCmd(), newPluginRemoveCmd(reg))
+	cmd.AddCommand(newPluginInstallCmd(reg), newPluginListCmd(reg), newPluginRemoveCmd(reg))
 	return cmd
 }
 
@@ -276,19 +276,19 @@ func confirm(cmd *cobra.Command, prompt string) (bool, error) {
 	return answer == "y" || answer == "yes", nil
 }
 
-func newPluginListCmd() *cobra.Command {
+func newPluginListCmd(reg *registry.Registry) *cobra.Command {
 	var output string
 	cmd := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls"},
-		Short:   "List plugins found on PATH and in the managed dir",
+		Short:   "List plugins found in the managed dir and on PATH",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			plugins := discoverPlugins()
+			plugins := reg.List()
 			if output == "json" {
-				enc := json.NewEncoder(os.Stdout)
+				enc := json.NewEncoder(cmd.OutOrStdout())
 				enc.SetIndent("", "  ")
 				if plugins == nil {
-					plugins = []pluginEntry{}
+					plugins = []registry.Plugin{}
 				}
 				return enc.Encode(plugins)
 			}
@@ -296,7 +296,7 @@ func newPluginListCmd() *cobra.Command {
 				fmt.Fprintln(cmd.ErrOrStderr(), "No plugins found. Install one with: mf plugin install <name|owner/name|url|path>")
 				return nil
 			}
-			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 			fmt.Fprintln(w, "NAME\tVERSION\tSOURCE\tPATH")
 			for _, p := range plugins {
 				source, path, version := "PATH", p.Path, "-"

@@ -11,15 +11,11 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"sort"
 	"strings"
-
-	"github.com/mguilarducci/mf-cli/cmd/mf/internal/registry"
 )
 
-// Managed plugin storage. The dispatcher resolves `mf-<name>` from PATH,
-// period. `mf plugin install` stays additive to that by linking binaries
-// into a managed bin dir that main.go prepends to PATH:
+// Managed plugin storage. The Plugin registry resolves `mf-<name>` on its
+// Search path, which starts with the managed bin dir:
 //
 //	<parent>/bin/mf-<name>   dispatch surface (symlink, or copy as fallback)
 //	<parent>/pkg/<name>/     remote installs: binary + manifest.yml
@@ -51,22 +47,6 @@ func PluginBinDir() (string, error) {
 	return filepath.Join(parent, "bin"), nil
 }
 
-// PrependPluginBinDirToPATH makes managed plugins discoverable. Silent on
-// failure: PATH-installed plugins still work.
-func PrependPluginBinDirToPATH() {
-	dir, err := PluginBinDir()
-	if err != nil {
-		return
-	}
-	path := os.Getenv("PATH")
-	for _, p := range filepath.SplitList(path) {
-		if p == dir {
-			return
-		}
-	}
-	_ = os.Setenv("PATH", dir+string(os.PathListSeparator)+path)
-}
-
 // pluginNameFromPath derives a plugin name from a binary path:
 // ./bin/mf-digisac -> digisac, and on Windows mf-digisac.exe -> digisac.
 func pluginNameFromPath(path string) string {
@@ -75,18 +55,6 @@ func pluginNameFromPath(path string) string {
 		base = strings.TrimSuffix(base, filepath.Ext(base))
 	}
 	return strings.TrimPrefix(base, pluginBinaryPrefix)
-}
-
-// isExecutableFile reports whether path can be run as a plugin. Windows has
-// no executable bit, so it goes by extension (PATHEXT), like exec.LookPath.
-func isExecutableFile(path string, info os.FileInfo) bool {
-	if info.IsDir() {
-		return false
-	}
-	if runtime.GOOS == windowsGOOS {
-		return isWindowsExecExt(filepath.Ext(path))
-	}
-	return info.Mode().Perm()&0o111 != 0
 }
 
 func isWindowsExecExt(ext string) bool {
@@ -128,57 +96,4 @@ func copyExecutable(src, dst string) (err error) {
 		return fmt.Errorf("write plugin copy: %w", err)
 	}
 	return nil
-}
-
-type pluginEntry struct {
-	Name     string          `json:"name"`
-	Path     string          `json:"path"`
-	Target   string          `json:"target,omitempty"` // symlink target, if any
-	Managed  bool            `json:"managed"`
-	Manifest *PluginManifest `json:"manifest,omitempty"` // remote installs only
-}
-
-// discoverPlugins lists every mf-<name> executable on PATH, first match wins,
-// sorted by name. Managed entries are flagged.
-func discoverPlugins() []pluginEntry {
-	binDir, err := PluginBinDir()
-	if err != nil {
-		binDir = "" // no managed dir: every entry is a plain PATH plugin
-	}
-	seen := map[string]bool{}
-	var out []pluginEntry
-	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			if !strings.HasPrefix(e.Name(), pluginBinaryPrefix) {
-				continue
-			}
-			name := pluginNameFromPath(e.Name())
-			if seen[name] || registry.ValidateName(name) != nil {
-				continue
-			}
-			path := filepath.Join(dir, e.Name())
-			info, err := os.Stat(path) //nolint:gosec // path is a PATH entry joined with a validated mf-<name>
-			if err != nil || !isExecutableFile(path, info) {
-				continue
-			}
-			seen[name] = true
-			target, err := os.Readlink(path)
-			if err != nil {
-				target = "" // not a symlink
-			}
-			entry := pluginEntry{Name: name, Path: path, Target: target, Managed: dir == binDir}
-			if entry.Managed {
-				if m, err := LoadPluginManifest(name); err == nil {
-					entry.Manifest = m
-				}
-			}
-			out = append(out, entry)
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out
 }

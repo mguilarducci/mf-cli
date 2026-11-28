@@ -9,24 +9,26 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/mguilarducci/mf-cli/cmd/mf/internal/registry"
 )
 
 // usePluginCommandsInRootHelp appends a "Plugin Commands" section to the
 // root help so installed plugins show up next to the built-ins.
-func usePluginCommandsInRootHelp(root *cobra.Command) {
+func usePluginCommandsInRootHelp(root *cobra.Command, reg *registry.Registry) {
 	defaultHelp := root.HelpFunc()
 	root.SetHelpFunc(func(cmd *cobra.Command, args []string) {
 		defaultHelp(cmd, args)
 		if cmd != root {
 			return
 		}
-		if section := formatPluginHelpSection(root, discoverPlugins()); section != "" {
+		if section := formatPluginHelpSection(root, reg.List()); section != "" {
 			fmt.Fprint(cmd.OutOrStdout(), section)
 		}
 	})
 }
 
-func formatPluginHelpSection(root *cobra.Command, plugins []pluginEntry) string {
+func formatPluginHelpSection(root *cobra.Command, plugins []registry.Plugin) string {
 	var b strings.Builder
 	for _, p := range plugins {
 		if shadowsBuiltinCommand(root, p.Name) {

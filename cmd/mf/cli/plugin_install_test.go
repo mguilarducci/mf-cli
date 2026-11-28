@@ -258,10 +258,9 @@ func TestInstallFromRepoEndToEnd(t *testing.T) {
 		t.Errorf("manifest = %+v; want newest stable tag v1.0.0, verified", m)
 	}
 
-	PrependPluginBinDirToPATH()
-	plugins := discoverPlugins()
+	plugins := registry.New(registry.EnvFromProcess()).List()
 	if len(plugins) != 1 || plugins[0].Name != "hello" || plugins[0].Manifest == nil || plugins[0].Manifest.Tag != "v1.0.0" {
-		t.Fatalf("discoverPlugins = %+v", plugins)
+		t.Fatalf("registry List() = %+v", plugins)
 	}
 
 	if _, err := InstallPluginFromRepo(ctx, reg, repoURL, "hello", RemoteInstallOptions{}); err == nil {

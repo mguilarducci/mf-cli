@@ -36,7 +36,6 @@ func TestRunPluginDataDirFromRegistry(t *testing.T) {
 	writeScript(t, filepath.Join(binDir, "mf-hello"),
 		"printf '%s' \"$MF_PLUGIN_DATA_DIR\" > \"$1\"\n",
 		"echo %MF_PLUGIN_DATA_DIR%> \"%~1\"\r\n")
-	t.Setenv("PATH", binDir)
 	t.Setenv("MF_PLUGIN_DIR", t.TempDir()) // must not be consulted: the registry is the source
 
 	regDir := t.TempDir()
@@ -53,5 +52,32 @@ func TestRunPluginDataDirFromRegistry(t *testing.T) {
 	}
 	if want := filepath.Join(regDir, "data", "hello"); strings.TrimSpace(string(got)) != want {
 		t.Errorf("MF_PLUGIN_DATA_DIR = %q; want %q", got, want)
+	}
+}
+
+func TestRunPluginRunsWhatRegistryResolves(t *testing.T) {
+	t.Parallel()
+	regDir, pathDir := t.TempDir(), t.TempDir()
+	if err := os.MkdirAll(filepath.Join(regDir, "bin"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	writeScript(t, filepath.Join(regDir, "bin", "mf-hello"),
+		"printf 'managed\\n%s\\n' \"$PATH\" > \"$1\"\n",
+		"echo managed> \"%~1\"\r\necho %PATH%>> \"%~1\"\r\n")
+	writeScript(t, filepath.Join(pathDir, "mf-hello"), "echo path > \"$1\"\n", "echo path> \"%~1\"\r\n")
+	reg := registry.New(registry.Env{PluginDir: regDir, Path: []string{pathDir}, GOOS: runtime.GOOS})
+	out := filepath.Join(t.TempDir(), "out")
+
+	handled, code := MaybeRunPlugin(context.Background(), reg, NewRootCmd(reg), []string{"hello", out})
+	if !handled || code != 0 {
+		t.Fatalf("MaybeRunPlugin = (%v, %d); want (true, 0)", handled, code)
+	}
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(strings.ReplaceAll(string(got), "\r", "")), "\n")
+	if len(lines) != 2 || lines[0] != "managed" || strings.TrimSpace(lines[1]) != reg.SearchPath() {
+		t.Errorf("plugin wrote %q; want managed and PATH %q", got, reg.SearchPath())
 	}
 }

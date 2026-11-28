@@ -23,7 +23,7 @@ func NewRootCmd(reg *registry.Registry) *cobra.Command {
 		RunE:          func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
 	root.AddCommand(newPluginGroupCmd(reg))
-	usePluginCommandsInRootHelp(root)
+	usePluginCommandsInRootHelp(root, reg)
 	return root
 }
 

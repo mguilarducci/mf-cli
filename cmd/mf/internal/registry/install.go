@@ -61,21 +61,6 @@ func (r *Registry) entries(name string) ([]string, error) {
 
 func (r *Registry) isWindows() bool { return r.env.GOOS == "windows" }
 
-// pathExts is the lowercased PATHEXT list, defaulting like Windows does.
-func (r *Registry) pathExts() []string {
-	pathext := r.env.PathExt
-	if pathext == "" {
-		pathext = ".com;.exe;.bat;.cmd"
-	}
-	var exts []string
-	for _, e := range strings.Split(strings.ToLower(pathext), ";") {
-		if e != "" {
-			exts = append(exts, e)
-		}
-	}
-	return exts
-}
-
 // InstallLocal makes the executable at src runnable as `mf <name>` and
 // returns the registry entry it placed. A symlink keeps a dev build live
 // across rebuilds; a copy is the fallback for filesystems (or Windows
